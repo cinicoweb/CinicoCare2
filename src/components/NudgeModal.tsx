@@ -1,10 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { X, Send, MessageSquare, Bell, Smartphone, Check, UserCheck, AlertCircle, Share2 } from 'lucide-react';
+import { X, Send, Bell, Check, AlertCircle, Bot, ExternalLink } from 'lucide-react';
 import { ScheduledDoseItem, User } from '../types';
 import { api } from '../services/api';
 import { showLocalNotification } from '../utils/notifications';
 import { audioAlert } from '../utils/audio';
-import { formatCaregiverAlertMessage, formatPhoneNumber } from '../utils/phone';
+import { formatCaregiverAlertMessage } from '../utils/phone';
 
 interface NudgeModalProps {
   isOpen: boolean;
@@ -22,8 +22,7 @@ export const NudgeModal: React.FC<NudgeModalProps> = ({
   onSuccess
 }) => {
   const [selectedCaregiverId, setSelectedCaregiverId] = useState<string>('all');
-  const [selectedPhone, setSelectedPhone] = useState('');
-  const [channel, setChannel] = useState<'all' | 'whatsapp' | 'telegram' | 'push'>('all');
+  const [channel, setChannel] = useState<'all' | 'telegram' | 'push'>('all');
   const [customText, setCustomText] = useState('');
   const [sending, setSending] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -43,14 +42,6 @@ export const NudgeModal: React.FC<NudgeModalProps> = ({
     if (doseItem) {
       const selectedCaregiver = patientCaregivers.find(c => c.id === selectedCaregiverId);
       const caregiverName = selectedCaregiver ? selectedCaregiver.name : (patientCaregivers[0]?.name || 'Caregiver');
-
-      if (selectedCaregiver && selectedCaregiver.phone) {
-        setSelectedPhone(selectedCaregiver.phone);
-      } else if (patientCaregivers.length > 0 && patientCaregivers[0].phone) {
-        setSelectedPhone(patientCaregivers[0].phone);
-      } else {
-        setSelectedPhone('');
-      }
 
       const generated = formatCaregiverAlertMessage({
         caregiverName,
@@ -74,7 +65,6 @@ export const NudgeModal: React.FC<NudgeModalProps> = ({
 
     const selectedCaregiver = patientCaregivers.find(c => c.id === selectedCaregiverId);
     const caregiverName = selectedCaregiver ? selectedCaregiver.name : undefined;
-    const formattedPhone = selectedPhone ? formatPhoneNumber(selectedPhone) : undefined;
 
     try {
       const res = await api.nudgeDose({
@@ -82,7 +72,6 @@ export const NudgeModal: React.FC<NudgeModalProps> = ({
         patientId: doseItem.patient.id,
         scheduledDate: doseItem.scheduledDate,
         scheduledTime: doseItem.scheduledTime,
-        targetPhone: formattedPhone,
         channel,
         caregiverName
       });
@@ -93,29 +82,12 @@ export const NudgeModal: React.FC<NudgeModalProps> = ({
         body: `Somministrare ${doseItem.therapy.medicationName} ${doseItem.therapy.dosage ? `(${doseItem.therapy.dosage})` : ''} previsto per le ${doseItem.scheduledTime}.`
       });
 
-      setFeedback(`Sollecito inviato con successo! Canali notificati.`);
-
-      const textToSend = customText;
-
-      // Handle direct app opening if requested
-      if (channel === 'whatsapp' || channel === 'all') {
-        const cleanPhone = formattedPhone ? formattedPhone.replace(/[^0-9]/g, '') : '';
-        const waUrl = cleanPhone
-          ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(textToSend)}`
-          : `https://api.whatsapp.com/send?text=${encodeURIComponent(textToSend)}`;
-
-        window.open(waUrl, '_blank');
-      }
-
-      if (channel === 'telegram') {
-        const tgUrl = `https://t.me/share/url?url=${encodeURIComponent(window.location.origin)}&text=${encodeURIComponent(textToSend)}`;
-        window.open(tgUrl, '_blank');
-      }
+      setFeedback(`Sollecito Telegram inviato tramite il bot @Guardian32170_bot!`);
 
       setTimeout(() => {
         onSuccess();
         onClose();
-      }, 1200);
+      }, 1400);
 
     } catch (err: any) {
       setFeedback(err.message || 'Errore invio sollecito');
@@ -129,14 +101,14 @@ export const NudgeModal: React.FC<NudgeModalProps> = ({
       <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full border border-slate-200 overflow-hidden">
         
         {/* Header */}
-        <div className="p-5 bg-gradient-to-r from-emerald-600 to-teal-700 text-white flex items-center justify-between">
+        <div className="p-5 bg-gradient-to-r from-sky-600 to-cyan-700 text-white flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="p-2 bg-white/10 rounded-xl">
-              <MessageSquare className="w-5 h-5 text-emerald-200" />
+              <Bot className="w-5 h-5 text-sky-200" />
             </div>
             <div>
               <h3 className="font-bold text-lg font-['Outfit']">Invia Sollecito Farmaco</h3>
-              <p className="text-xs text-emerald-100 mt-0.5">Notifica automatica o manuale WhatsApp / Telegram / Push</p>
+              <p className="text-xs text-sky-100 mt-0.5">Notifica Telegram automatica bot @Guardian32170_bot</p>
             </div>
           </div>
           <button
@@ -151,8 +123,8 @@ export const NudgeModal: React.FC<NudgeModalProps> = ({
         <div className="p-6 space-y-4 text-xs text-slate-700">
           
           {feedback && (
-            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 font-semibold flex items-center gap-2">
-              <Check className="w-4 h-4 text-emerald-600" />
+            <div className="p-3 bg-sky-50 border border-sky-200 rounded-xl text-sky-900 font-semibold flex items-center gap-2">
+              <Check className="w-4 h-4 text-sky-600" />
               <span>{feedback}</span>
             </div>
           )}
@@ -178,47 +150,35 @@ export const NudgeModal: React.FC<NudgeModalProps> = ({
           {/* Channel selector */}
           <div>
             <label className="block font-semibold text-slate-800 mb-1.5">Canale di Notifica</label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
                 onClick={() => setChannel('all')}
-                className={`py-2 px-2 rounded-xl border font-bold text-[11px] flex items-center justify-center gap-1 transition-all ${
+                className={`py-2 px-2 rounded-xl border font-bold text-[11px] flex items-center justify-center gap-1.5 transition-all ${
                   channel === 'all'
-                    ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs'
-                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                }`}
-              >
-                <Share2 className="w-3.5 h-3.5" />
-                Tutti i Canali
-              </button>
-              <button
-                type="button"
-                onClick={() => setChannel('whatsapp')}
-                className={`py-2 px-2 rounded-xl border font-bold text-[11px] flex items-center justify-center gap-1 transition-all ${
-                  channel === 'whatsapp'
-                    ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs'
-                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                }`}
-              >
-                <MessageSquare className="w-3.5 h-3.5" />
-                WhatsApp
-              </button>
-              <button
-                type="button"
-                onClick={() => setChannel('telegram')}
-                className={`py-2 px-2 rounded-xl border font-bold text-[11px] flex items-center justify-center gap-1 transition-all ${
-                  channel === 'telegram'
                     ? 'bg-sky-700 text-white border-sky-700 shadow-xs'
                     : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                 }`}
               >
+                <Bot className="w-3.5 h-3.5" />
+                Tutti i Canali
+              </button>
+              <button
+                type="button"
+                onClick={() => setChannel('telegram')}
+                className={`py-2 px-2 rounded-xl border font-bold text-[11px] flex items-center justify-center gap-1.5 transition-all ${
+                  channel === 'telegram'
+                    ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
                 <Send className="w-3.5 h-3.5" />
-                Telegram
+                Telegram Bot
               </button>
               <button
                 type="button"
                 onClick={() => setChannel('push')}
-                className={`py-2 px-2 rounded-xl border font-bold text-[11px] flex items-center justify-center gap-1 transition-all ${
+                className={`py-2 px-2 rounded-xl border font-bold text-[11px] flex items-center justify-center gap-1.5 transition-all ${
                   channel === 'push'
                     ? 'bg-indigo-700 text-white border-indigo-700 shadow-xs'
                     : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
@@ -239,42 +199,58 @@ export const NudgeModal: React.FC<NudgeModalProps> = ({
               <select
                 value={selectedCaregiverId}
                 onChange={(e) => setSelectedCaregiverId(e.target.value)}
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-emerald-600 outline-none text-xs"
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-sky-600 outline-none text-xs"
               >
                 <option value="all">Tutti i Caregiver del Paziente ({patientCaregivers.length})</option>
                 {patientCaregivers.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name} ({c.role === 'familiare' ? 'Familiare' : 'Caregiver'}) {c.phone ? `- ${c.phone}` : '(senza tel)'}
+                    {c.name} ({c.role === 'familiare' ? 'Familiare' : 'Caregiver'}) {c.telegramChatId ? `[Telegram @${c.telegramUsername || 'Collegato'}]` : '[Telegram non collegato]'}
                   </option>
                 ))}
               </select>
-
-              <input
-                type="tel"
-                value={selectedPhone}
-                onChange={(e) => setSelectedPhone(e.target.value)}
-                placeholder="Oppure inserisci numero con prefisso es. +39 347 1234567"
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-emerald-600 outline-none text-xs"
-              />
             </div>
+          </div>
+
+          {/* Caregiver Telegram status list */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1.5">
+            <div className="text-[11px] font-bold text-slate-700 mb-1">Stato Collegamento Telegram Bot:</div>
+            {patientCaregivers.map(c => (
+              <div key={c.id} className="flex items-center justify-between text-[11px]">
+                <span className="font-medium text-slate-800">{c.name}</span>
+                {c.telegramChatId ? (
+                  <span className="text-emerald-700 font-semibold flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                    <Check className="w-3 h-3" /> Collegato {c.telegramUsername ? `(@${c.telegramUsername})` : ''}
+                  </span>
+                ) : (
+                  <a
+                    href={`https://t.me/Guardian32170_bot?start=${c.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sky-700 hover:text-sky-800 font-semibold flex items-center gap-1 bg-sky-50 px-2 py-0.5 rounded-md border border-sky-200"
+                  >
+                    <ExternalLink className="w-3 h-3" /> Invia Link Avvio Bot
+                  </a>
+                )}
+              </div>
+            ))}
           </div>
 
           {/* Message Preview */}
           <div>
-            <label className="block font-semibold text-slate-800 mb-1.5">Anteprima Messaggio con Link di Conferma</label>
+            <label className="block font-semibold text-slate-800 mb-1.5">Anteprima Messaggio con Pulsante di Conferma</label>
             <textarea
-              rows={5}
+              rows={4}
               value={customText}
               onChange={(e) => setCustomText(e.target.value)}
-              className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-emerald-600 outline-none text-xs font-mono"
+              className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-sky-600 outline-none text-xs font-mono"
             />
           </div>
 
-          {/* Continuous Loop Notice */}
-          <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-3 flex items-start gap-2.5 text-amber-900">
-            <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+          {/* Bot Notice */}
+          <div className="bg-sky-50 border border-sky-200/80 rounded-xl p-3 flex items-start gap-2.5 text-sky-950">
+            <Bot className="w-4 h-4 text-sky-700 shrink-0 mt-0.5" />
             <div className="text-[11px] leading-relaxed">
-              <strong>Notifica Automatica & Forzatura:</strong> Il sistema calcola e inoltra automaticamente i solleciti all'orario previsto a tutti e soli i caregiver assegnati a questo paziente, includendo il link per confermare direttamente la somministrazione.
+              <strong>Bot Telegram Guardian (@Guardian32170_bot):</strong> I messaggi vengono recapitati direttamente nella chat Telegram dei caregiver incaricati con il pulsante interattivo a 1 tocco per registrare la somministrazione.
             </div>
           </div>
 
@@ -293,10 +269,10 @@ export const NudgeModal: React.FC<NudgeModalProps> = ({
             type="button"
             onClick={handleSendNudge}
             disabled={sending}
-            className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+            className="px-5 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
           >
             <Send className="w-4 h-4" />
-            {sending ? 'Invio in corso...' : 'Invia Sollecito Ora'}
+            {sending ? 'Invio in corso...' : 'Invia con Telegram Bot'}
           </button>
         </div>
 
@@ -304,3 +280,4 @@ export const NudgeModal: React.FC<NudgeModalProps> = ({
     </div>
   );
 };
+

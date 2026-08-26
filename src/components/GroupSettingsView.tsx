@@ -5,7 +5,6 @@ import {
   UserPlus,
   Settings,
   Bell,
-  MessageSquare,
   Volume2,
   Lock,
   Phone,
@@ -25,7 +24,9 @@ import {
   Link as LinkIcon,
   CheckCircle2,
   FileText,
-  RotateCcw
+  RotateCcw,
+  Bot,
+  ExternalLink
 } from 'lucide-react';
 import { Patient, User, Family, NotificationSettings, Invitation } from '../types';
 import { requestPushPermission } from '../utils/notifications';
@@ -102,11 +103,10 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
   const [memberSaving, setMemberSaving] = useState(false);
   const [memberError, setMemberError] = useState<string | null>(null);
 
-  // Smart WhatsApp Invite Link Modal state
+  // Smart One-Time Invite Link Modal state
   const [isInviteLinkModalOpen, setIsInviteLinkModalOpen] = useState(false);
   const [inviteRole, setInviteRole] = useState<'caregiver' | 'familiare'>('caregiver');
   const [inviteAssignedPatients, setInviteAssignedPatients] = useState<string[]>([]);
-  const [inviteRecipientPhone, setInviteRecipientPhone] = useState('');
   const [generatedInviteUrl, setGeneratedInviteUrl] = useState<string | null>(null);
   const [inviteGenerating, setInviteGenerating] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
@@ -119,14 +119,13 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
   );
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(
     currentFamily?.notificationSettings || {
-      whatsappEnabled: true,
+      whatsappEnabled: false,
       telegramEnabled: true,
       pushEnabled: true,
       soundAlarmEnabled: true,
       preAlertMinutes: 15,
       repeatIntervalMinutes: 10,
       autoRepeatNudges: true,
-      customWhatsappTemplate: '🔔 *CinicoCare Promemoria Terapia*\nCiao *{caregiver}*, è ora del farmaco per *{paziente}*!\n💊 Farmaco: *{farmaco}*{dosaggio}\n⏰ Orario: *{orario}*\n📝 Istruzioni: {istruzioni}\n\n👉 *Conferma somministrazione nell\'App:*\n{link_conferma}',
       customTelegramTemplate: '🔔 *CinicoCare Promemoria Terapia*\nCiao *{caregiver}*, è ora del farmaco per *{paziente}*!\n💊 Farmaco: *{farmaco}*{dosaggio}\n⏰ Orario: *{orario}*\n📝 Istruzioni: {istruzioni}\n\n👉 *Conferma somministrazione nell\'App:*\n{link_conferma}'
     }
   );
@@ -249,7 +248,6 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
   const handleOpenInviteLinkModal = () => {
     setInviteRole('caregiver');
     setInviteAssignedPatients(patients.map(p => p.id));
-    setInviteRecipientPhone('');
     setGeneratedInviteUrl(null);
     setInviteCopied(false);
     setInviteError(null);
@@ -281,34 +279,6 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
     setTimeout(() => setInviteCopied(false), 2500);
   };
 
-  const handleSendWhatsAppInviteLink = () => {
-    if (!generatedInviteUrl) return;
-    const roleLabel = inviteRole === 'caregiver' ? 'Caregiver Incaricato' : 'Familiare';
-    const famName = currentFamily?.name || 'la nostra famiglia';
-    
-    const message = `👋 *Invito CinicoCare - Gestione Terapie*\n\nCiao! Sei stato/a invitato/a a collaborare come *${roleLabel}* per il gruppo *"${famName}"*.\n\n👉 Clicca su questo link sicuro per registrarti e impostare la tua password personale:\n${generatedInviteUrl}\n\n*(Il link è personale e monouso)*`;
-
-    const formatted = inviteRecipientPhone ? formatPhoneNumber(inviteRecipientPhone) : '';
-    const cleanPhone = formatted.replace(/[^0-9]/g, '');
-    const url = cleanPhone
-      ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(message)}`
-      : `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
-    
-    window.open(url, '_blank');
-  };
-
-  // Send WhatsApp invite to an existing registered member
-  const handleSendWhatsAppInvite = (member: User) => {
-    const baseUrl = (window.location.origin + window.location.pathname).replace(/\/$/, '');
-    const text = `👋 Ciao ${member.name}! Sei nel gruppo "${currentFamily?.name || 'CinicoCare'}" per la gestione e somministrazione farmaci.\n\n👉 Accedi a CinicoCare con la tua email (${member.email}) qui:\n${baseUrl}`;
-    const formatted = member.phone ? formatPhoneNumber(member.phone) : '';
-    const cleanPhone = formatted.replace(/[^0-9]/g, '');
-    const url = cleanPhone
-      ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(text)}`
-      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
-    window.open(url, '_blank');
-  };
-
   // --- Handlers: Settings ---
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -338,7 +308,7 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
               Impostazioni & Anagrafica Unificata del Gruppo
             </h2>
             <p className="text-xs text-slate-500 mt-1">
-              Gestione centralizzata di pazienti, caregiver, inviti sicuri WhatsApp e configurazione promemoria.
+              Gestione centralizzata di pazienti, caregiver, bot Telegram @Guardian32170_bot e promemoria.
             </p>
           </div>
 
@@ -386,7 +356,7 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
             }`}
           >
             <Bell className="w-4 h-4" />
-            Notifiche, WhatsApp & Solleciti
+            Notifiche, Telegram & Solleciti
           </button>
         </div>
       </div>
@@ -522,7 +492,7 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="font-bold text-slate-800 text-sm">Familiari e Caregiver del Gruppo</h3>
-              <p className="text-xs text-slate-500">Gestisci i collaboratori o invia un link WhatsApp monouso per registrazione autonoma.</p>
+              <p className="text-xs text-slate-500">Gestisci i collaboratori, le assegnazioni pazienti e il collegamento al Bot Telegram.</p>
             </div>
 
             {isFamilyAdmin && (
@@ -530,10 +500,10 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
                 <button
                   onClick={handleOpenInviteLinkModal}
                   className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors"
-                  title="Genera link WhatsApp sicuro e monouso per registrazione autonoma"
+                  title="Genera link sicuro e monouso per registrazione autonoma"
                 >
                   <Share2 className="w-4 h-4" />
-                  Link Invito WhatsApp
+                  Link Invito Monouso
                 </button>
 
                 <button
@@ -551,6 +521,7 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
             {members.map(m => {
               const isSelf = m.id === currentUser.id;
               const isMemberAdmin = m.isFamilyAdmin;
+              const tgLink = api.getTelegramDeepLink(m.id);
 
               return (
                 <div
@@ -613,10 +584,35 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
                         <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                         <span className="truncate">{m.email}</span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span>{m.phone || 'Nessun numero WhatsApp'}</span>
+                      {m.phone && (
+                        <div className="flex items-center gap-2">
+                          <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span>{m.phone}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Telegram Bot status */}
+                    <div className="mt-2.5 p-2 bg-sky-50/70 border border-sky-200/80 rounded-xl flex items-center justify-between text-[11px]">
+                      <div className="flex items-center gap-1.5 text-sky-950 font-medium">
+                        <Bot className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                        <span>Telegram:</span>
                       </div>
+                      {m.telegramChatId ? (
+                        <span className="text-emerald-700 font-bold flex items-center gap-1">
+                          <Check className="w-3 h-3" /> Collegato {m.telegramUsername ? `(@${m.telegramUsername})` : ''}
+                        </span>
+                      ) : (
+                        <a
+                          href={tgLink}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sky-700 hover:text-sky-900 font-bold underline flex items-center gap-0.5"
+                          title="Clicca per collegare il bot @Guardian32170_bot"
+                        >
+                          Collega Bot <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+                      )}
                     </div>
 
                     {/* Assigned Patients count */}
@@ -624,25 +620,27 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
                       <strong>Pazienti seguiti:</strong>{' '}
                       {m.assignedPatientIds && m.assignedPatientIds.length > 0
                         ? m.assignedPatientIds.map(pid => patients.find(p => p.id === pid)?.name).filter(Boolean).join(', ')
-                        : 'Tutti i pazienti della famiglia'}
+                        : 'Tutti i pazienti del gruppo'}
                     </div>
                   </div>
 
-                  {/* WhatsApp Invitation action */}
+                  {/* Member Card Footer Actions */}
                   <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-                    <button
-                      onClick={() => handleSendWhatsAppInvite(m)}
-                      className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 hover:underline"
-                      title="Invia messaggio di promemoria accesso WhatsApp con link all'app"
+                    <a
+                      href={tgLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs font-semibold text-sky-700 hover:text-sky-900 flex items-center gap-1 hover:underline"
+                      title="Apri link Telegram univoco"
                     >
-                      <Share2 className="w-3.5 h-3.5" />
-                      Invia WhatsApp
-                    </button>
+                      <Bot className="w-3.5 h-3.5" />
+                      Link Telegram
+                    </a>
 
                     {isFamilyAdmin && (
                       <button
                         onClick={() => handleOpenMemberModal(m)}
-                        className="text-xs font-semibold text-sky-700 hover:text-sky-800 flex items-center gap-1 hover:underline"
+                        className="text-xs font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-1 hover:underline"
                         title="Cambia password di questo utente"
                       >
                         <Key className="w-3.5 h-3.5" />
@@ -658,14 +656,14 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
         </div>
       )}
 
-      {/* SUB-TAB 3: NOTIFICATIONS, CHANNELS & PRIVACY DISCLAIMER */}
+      {/* SUB-TAB 3: NOTIFICATIONS, TELEGRAM BOT & PRIVACY DISCLAIMER */}
       {activeSubTab === 'notifications' && (
         <form onSubmit={handleSaveSettings} className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-6">
           
           {settingsSuccess && (
             <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs font-semibold flex items-center gap-2">
               <Check className="w-4 h-4 text-emerald-600" />
-              <span>Impostazioni di gruppo, canali e informativa salvate con successo!</span>
+              <span>Impostazioni di gruppo, Telegram Bot e informativa salvate con successo!</span>
             </div>
           )}
 
@@ -683,48 +681,26 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
 
           {/* Notification Channels */}
           <div className="border-t border-slate-100 pt-5">
-            <h4 className="font-bold text-slate-900 text-sm mb-1">Canali di Notifica & Allarmi</h4>
+            <h4 className="font-bold text-slate-900 text-sm mb-1">Canali di Notifica & Bot Telegram</h4>
             <p className="text-xs text-slate-500 mb-4">
-              Tutte le funzioni di notifica possono essere attivate o disattivate singolarmente. I messaggi sono inviati ai caregiver assegnati al paziente.
+              I promemoria e gli allarmi delle terapie vengono recapitati in tempo reale tramite il bot ufficiale @Guardian32170_bot e le notifiche push.
             </p>
 
             <div className="space-y-4">
               
-              {/* WhatsApp Toggle */}
-              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200">
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-emerald-100 text-emerald-800 rounded-xl shrink-0">
-                    <MessageSquare className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="font-bold text-slate-900 text-xs sm:text-sm">Avvisi & Solleciti WhatsApp</div>
-                    <div className="text-[11px] text-slate-500">
-                      Invia messaggi preformattati via WhatsApp ai caregiver assegnati con link diretto di conferma somministrazione.
-                    </div>
-                  </div>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    disabled={!isFamilyAdmin}
-                    checked={notificationSettings.whatsappEnabled}
-                    onChange={(e) => setNotificationSettings({ ...notificationSettings, whatsappEnabled: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-                </label>
-              </div>
-
               {/* Telegram Toggle */}
-              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200">
+              <div className="flex items-center justify-between p-4 bg-sky-50/70 rounded-xl border border-sky-200">
                 <div className="flex items-start gap-3">
-                  <div className="p-2 bg-sky-100 text-sky-800 rounded-xl shrink-0">
-                    <Send className="w-5 h-5" />
+                  <div className="p-2 bg-sky-600 text-white rounded-xl shrink-0">
+                    <Bot className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="font-bold text-slate-900 text-xs sm:text-sm">Avvisi & Solleciti Telegram</div>
-                    <div className="text-[11px] text-slate-500">
-                      Invia promemoria istantanei via Telegram con link di conferma rapida per ciascun caregiver.
+                    <div className="font-bold text-slate-900 text-xs sm:text-sm flex items-center gap-2">
+                      <span>Notifiche & Promemoria Bot Telegram (@Guardian32170_bot)</span>
+                      <span className="px-2 py-0.5 bg-sky-200 text-sky-900 text-[10px] font-bold rounded">Canale Principale</span>
+                    </div>
+                    <div className="text-[11px] text-slate-600 mt-0.5">
+                      Invia promemoria istantanei via Telegram con link diretto e pulsante di conferma a 1 tocco per ciascun caregiver assegnato.
                     </div>
                   </div>
                 </div>
@@ -796,36 +772,22 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
             </div>
           </div>
 
-          {/* Templates */}
+          {/* Telegram Template */}
           <div className="border-t border-slate-100 pt-5 space-y-4">
-            <h4 className="font-bold text-slate-900 text-sm">Template Messaggi di Allerta</h4>
+            <h4 className="font-bold text-slate-900 text-sm">Template Messaggi Telegram (@Guardian32170_bot)</h4>
             <p className="text-xs text-slate-500">
-              Personalizza i testi inviati su WhatsApp e Telegram. Variabili disponibili: <code>{'{caregiver}'}</code>, <code>{'{paziente}'}</code>, <code>{'{farmaco}'}</code>, <code>{'{dosaggio}'}</code>, <code>{'{orario}'}</code>, <code>{'{istruzioni}'}</code>, <code>{'{link_conferma}'}</code>.
+              Personalizza il testo inviato dal Bot Telegram. Variabili disponibili: <code>{'{caregiver}'}</code>, <code>{'{paziente}'}</code>, <code>{'{farmaco}'}</code>, <code>{'{dosaggio}'}</code>, <code>{'{orario}'}</code>, <code>{'{istruzioni}'}</code>, <code>{'{link_conferma}'}</code>.
             </p>
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1.5">
-                <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
-                Template Messaggio WhatsApp
-              </label>
-              <textarea
-                rows={3}
-                disabled={!isFamilyAdmin}
-                value={notificationSettings.customWhatsappTemplate}
-                onChange={(e) => setNotificationSettings({ ...notificationSettings, customWhatsappTemplate: e.target.value })}
-                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono outline-none focus:bg-white focus:border-sky-600"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1.5">
                 <Send className="w-3.5 h-3.5 text-sky-600" />
-                Template Messaggio Telegram
+                Template Messaggio Bot Telegram
               </label>
               <textarea
-                rows={3}
+                rows={4}
                 disabled={!isFamilyAdmin}
-                value={notificationSettings.customTelegramTemplate || notificationSettings.customWhatsappTemplate}
+                value={notificationSettings.customTelegramTemplate || '🔔 *CinicoCare Promemoria Terapia*\nCiao *{caregiver}*, è ora del farmaco per *{paziente}*!\n💊 Farmaco: *{farmaco}*{dosaggio}\n⏰ Orario: *{orario}*\n📝 Istruzioni: {istruzioni}\n\n👉 *Conferma somministrazione nell\'App:*\n{link_conferma}'}
                 onChange={(e) => setNotificationSettings({ ...notificationSettings, customTelegramTemplate: e.target.value })}
                 className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono outline-none focus:bg-white focus:border-sky-600"
               />
@@ -983,7 +945,7 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
         </div>
       )}
 
-      {/* MODAL: SMART WHATSAPP INVITE LINK (ONE-TIME SECURE TOKEN) */}
+      {/* MODAL: SMART INVITE LINK (ONE-TIME SECURE TOKEN) */}
       {isInviteLinkModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full border border-slate-200 overflow-hidden">
@@ -993,8 +955,8 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
                   <Share2 className="w-5 h-5 text-emerald-200" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-base font-['Outfit']">Invita via WhatsApp con Link Sicuro</h3>
-                  <p className="text-[11px] text-emerald-100">Registrazione autonoma con password scelta dall'utente (monouso)</p>
+                  <h3 className="font-bold text-base font-['Outfit']">Invito con Link Sicuro Monouso</h3>
+                  <p className="text-[11px] text-emerald-100">Registrazione autonoma con password scelta dall'utente</p>
                 </div>
               </div>
               <button
@@ -1080,26 +1042,6 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
                 </div>
               )}
 
-              {/* Recipient Phone (Optional for direct WhatsApp chat opening) */}
-              <div>
-                <label className="block font-semibold text-slate-800 mb-1">
-                  Numero WhatsApp Destinatario (Opzionale, con prefisso es. +39)
-                </label>
-                <div className="relative">
-                  <Phone className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-                  <input
-                    type="tel"
-                    value={inviteRecipientPhone}
-                    onChange={(e) => setInviteRecipientPhone(e.target.value)}
-                    placeholder="+39 338 1234567"
-                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-emerald-600 outline-none text-xs"
-                  />
-                </div>
-                <span className="text-[10px] text-slate-500 mt-0.5 block">
-                  Se vuoto, WhatsApp ti permetterà di scegliere il contatto al momento dell'invio.
-                </span>
-              </div>
-
               {/* Generate button or Generated Link Display */}
               {!generatedInviteUrl ? (
                 <div className="pt-2">
@@ -1136,20 +1078,11 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
                   <div className="flex flex-col sm:flex-row gap-2 pt-1">
                     <button
                       type="button"
-                      onClick={handleSendWhatsAppInviteLink}
+                      onClick={handleCopyInviteLink}
                       className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-xs transition-colors"
                     >
-                      <Share2 className="w-4 h-4" />
-                      Invia su WhatsApp
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleCopyInviteLink}
-                      className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors"
-                    >
-                      {inviteCopied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-                      {inviteCopied ? 'Copiato!' : 'Copia Link'}
+                      {inviteCopied ? <Check className="w-4 h-4 text-white" /> : <Copy className="w-4 h-4" />}
+                      {inviteCopied ? 'Link Copiato negli Appunti!' : 'Copia Link Invito'}
                     </button>
                   </div>
                 </div>
@@ -1178,7 +1111,7 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
                 <h3 className="font-bold text-base font-['Outfit']">
                   {editingMember ? `Modifica Profilo / Password: ${editingMember.name}` : 'Nuovo Familiare o Caregiver'}
                 </h3>
-                <p className="text-[11px] text-sky-100">Imposta contatti WhatsApp, ruolo e password di accesso</p>
+                <p className="text-[11px] text-sky-100">Imposta anagrafica, ruolo e password di accesso</p>
               </div>
               <button
                 onClick={() => setIsMemberModalOpen(false)}
@@ -1221,7 +1154,7 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-800 mb-1">Cellulare (per WhatsApp)</label>
+                  <label className="block font-semibold text-slate-800 mb-1">Cellulare (opzionale)</label>
                   <input
                     type="tel"
                     value={memberPhone}
@@ -1327,3 +1260,4 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
     </div>
   );
 };
+

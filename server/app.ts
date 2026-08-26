@@ -2,6 +2,14 @@ import express, { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { JsonDatabase, hashPassword, getTodayDateString } from './db';
 import { User, Family, Patient, Therapy, DoseLog, Invitation, BootstrapData, AdminOverviewData } from '../src/types';
+import {
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_BOT_USERNAME,
+  getTelegramDeepLink,
+  sendTelegramMessage,
+  processTelegramUpdates,
+  generateRegistrationEmailHtml
+} from './telegram';
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -183,10 +191,24 @@ app.post('/api/auth/register', (req, res) => {
     db.users.push(newUser);
     dbInstance.persist();
 
+    const origin = req.headers.origin || 'https://cinicocare.vercel.app';
+    const telegramDeepLink = getTelegramDeepLink(newUser.id);
+    const registrationEmail = generateRegistrationEmailHtml({
+      name: newUser.name,
+      email: newUser.email,
+      password: password,
+      familyName: (familyName && familyName.trim()) || `Famiglia ${name.split(' ')[0]}`,
+      userId: newUser.id,
+      role: newUser.role,
+      appUrl: origin
+    });
+
     const token = generateToken(newUser.id);
     return res.json({
       user: sanitizeUser(newUser),
-      token
+      token,
+      telegramDeepLink,
+      registrationEmail
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || 'Errore durante la registrazione' });
@@ -233,7 +255,7 @@ app.get('/api/auth/me', authenticate, (req, res) => {
 app.put('/api/profile', authenticate, (req, res) => {
   try {
     const user = (req as any).user as User;
-    const { name, email, phone, currentPassword, newPassword } = req.body;
+    const { name, email, phone, telegramChatId, telegramUsername, currentPassword, newPassword } = req.body;
     const db = dbInstance.getData();
     const dbUser = db.users.find(u => u.id === user.id);
 
@@ -243,6 +265,10 @@ app.put('/api/profile', authenticate, (req, res) => {
 
     if (name && name.trim()) dbUser.name = name.trim();
     if (phone !== undefined) dbUser.phone = phone.trim();
+    if (telegramChatId !== undefined) dbUser.telegramChatId = telegramChatId ? telegramChatId.trim() : '';
+    if (telegramUsername !== undefined) dbUser.telegramUsername = telegramUsername ? telegramUsername.trim() : '';
+    if (telegramChatId && !dbUser.telegramConnectedAt) dbUser.telegramConnectedAt = new Date().toISOString();
+
     if (email && email.trim() && email.toLowerCase() !== dbUser.email) {
       const emailExists = db.users.some(u => u.id !== user.id && u.email.toLowerCase() === email.toLowerCase().trim());
       if (emailExists) {
@@ -276,7 +302,7 @@ app.post('/api/auth/logout', authenticate, (req, res) => {
 });
 
 // --------------------------------------------------------------------------
-// BOOTSTRAP DATA (Strict Family Group Isolation & SuperAdmin Exclusions)
+// BOOTSTRAP DATA (Strict Family Group Isolation & Caregiver Visibility)
 // --------------------------------------------------------------------------
 app.get('/api/bootstrap', authenticate, (req, res) => {
   try {
@@ -313,13 +339,23 @@ app.get('/api/bootstrap', authenticate, (req, res) => {
     }
 
     const family = db.families.find(f => f.id === familyId) || null;
-    const patients = db.patients.filter(p => p.familyId === familyId);
-    const therapies = db.therapies.filter(t => t.familyId === familyId);
+    let patients = db.patients.filter(p => p.familyId === familyId);
+    let therapies = db.therapies.filter(t => t.familyId === familyId);
     const members = db.users
       .filter(u => u.familyId === familyId && u.role !== 'superadmin')
       .map(sanitizeUser);
-    const doseLogs = db.doseLogs.filter(d => d.familyId === familyId);
+    let doseLogs = db.doseLogs.filter(d => d.familyId === familyId);
     const invitations = db.invitations.filter(i => i.familyId === familyId);
+
+    // STRICT CAREGIVER VISIBILITY:
+    // Caregivers (and users who are not family admins) only see their assigned patients and therapies.
+    const isCaregiver = user.role === 'caregiver' || !user.isFamilyAdmin;
+    if (isCaregiver) {
+      const assignedIds = new Set(user.assignedPatientIds || []);
+      patients = patients.filter(p => assignedIds.has(p.id));
+      therapies = therapies.filter(t => assignedIds.has(t.patientId));
+      doseLogs = doseLogs.filter(d => assignedIds.has(d.patientId));
+    }
 
     const responseData: BootstrapData = {
       user: sanitizeUser(user),
@@ -546,10 +582,25 @@ app.post('/api/members', authenticate, (req, res) => {
     db.invitations.push(invitation);
 
     dbInstance.persist();
+
+    const origin = req.headers.origin || 'https://cinicocare.vercel.app';
+    const telegramDeepLink = getTelegramDeepLink(newMember.id);
+    const registrationEmail = generateRegistrationEmailHtml({
+      name: newMember.name,
+      email: newMember.email,
+      password: initialPassword,
+      familyName: user.name ? `Gruppo di ${user.name}` : 'CinicoCare',
+      userId: newMember.id,
+      role: newMember.role,
+      appUrl: origin
+    });
+
     return res.json({
       success: true,
       member: sanitizeUser(newMember),
-      initialPassword
+      initialPassword,
+      telegramDeepLink,
+      registrationEmail
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || 'Errore creazione membro' });
@@ -794,17 +845,16 @@ app.post('/api/doses/toggle', authenticate, (req, res) => {
 });
 
 // --------------------------------------------------------------------------
-// NOTIFICATIONS & WHATSAPP NUDGE DISPATCH
+// NOTIFICATIONS & TELEGRAM NUDGE DISPATCH (Guardian @Guardian32170_bot)
 // --------------------------------------------------------------------------
-app.post('/api/doses/nudge', authenticate, (req, res) => {
+app.post('/api/doses/nudge', authenticate, async (req, res) => {
   try {
     const user = (req as any).user as User;
     const {
       therapyId,
       patientId,
       scheduledDate,
-      scheduledTime,
-      targetPhone
+      scheduledTime
     } = req.body;
 
     const db = dbInstance.getData();
@@ -843,41 +893,405 @@ app.post('/api/doses/nudge', authenticate, (req, res) => {
 
     dbInstance.persist();
 
-    const template = family?.notificationSettings?.customWhatsappTemplate ||
-      '🔔 *CinicoCare Promemoria*\nÈ ora del farmaco per *{paziente}*!\n💊 Farmaco: *{farmaco}* ({dosaggio})\n⏰ Orario: *{orario}*\n📝 Istruzioni: {istruzioni}';
+    const origin = req.headers.origin || 'https://cinicocare.vercel.app';
+    const confirmUrl = `${origin}?confirmDose=${doseId}`;
+    const dosageStr = therapy.dosage ? ` (${therapy.dosage})` : '';
 
-    const messageText = template
-      .replace('{paziente}', patient.name)
-      .replace('{farmaco}', therapy.medicationName)
-      .replace('{dosaggio}', therapy.dosage)
-      .replace('{orario}', scheduledTime)
-      .replace('{istruzioni}', therapy.instructions || 'Nessuna istruzione particolare')
-      .replace('{app_url}', req.headers.origin || 'CinicoCare App');
+    const messageHtml =
+      `🔔 <b>CinicoCare Promemoria Terapia</b>\n\n` +
+      `È ora del farmaco per <b>${patient.name}</b>!\n\n` +
+      `💊 <b>Farmaco:</b> ${therapy.medicationName}${dosageStr}\n` +
+      `⏰ <b>Orario:</b> ${scheduledTime}\n` +
+      (therapy.instructions ? `📝 <b>Istruzioni:</b> ${therapy.instructions}\n\n` : '\n') +
+      `👉 <i>Tocca il pulsante qui sotto per confermare la somministrazione nell'App:</i>`;
 
+    // Find all assigned caregivers for this patient in the family
     const caregiversForPatient = db.users.filter(u =>
       u.familyId === user.familyId &&
-      (u.assignedPatientIds.includes(patientId) || u.isFamilyAdmin) &&
-      u.phone
+      (u.assignedPatientIds.includes(patientId) || u.isFamilyAdmin)
     );
 
-    const phoneToUse = targetPhone || caregiversForPatient[0]?.phone || '';
-    const cleanPhone = phoneToUse.replace(/[^0-9+]/g, '');
+    const telegramResults: Array<{ caregiver: string; chatId?: string; success: boolean; error?: string }> = [];
 
-    const whatsappUrl = cleanPhone
-      ? `https://api.whatsapp.com/send?phone=${cleanPhone.replace('+', '')}&text=${encodeURIComponent(messageText)}`
-      : `https://api.whatsapp.com/send?text=${encodeURIComponent(messageText)}`;
+    // Dispatch directly via Telegram Bot to caregivers who have linked Telegram
+    for (const caregiver of caregiversForPatient) {
+      if (caregiver.telegramChatId) {
+        const sendResult = await sendTelegramMessage(
+          caregiver.telegramChatId,
+          messageHtml,
+          {
+            parseMode: 'HTML',
+            inlineKeyboard: [
+              [
+                {
+                  text: '✅ Ho somministrato il farmaco',
+                  url: confirmUrl
+                }
+              ]
+            ]
+          }
+        );
+        telegramResults.push({
+          caregiver: caregiver.name,
+          chatId: caregiver.telegramChatId,
+          success: sendResult.success,
+          error: sendResult.error
+        });
+      } else {
+        telegramResults.push({
+          caregiver: caregiver.name,
+          success: false,
+          error: 'Telegram non collegato'
+        });
+      }
+    }
+
+    const telegramLink = getTelegramDeepLink(user.id);
 
     return res.json({
       success: true,
-      message: 'Sollecito registrato con successo',
-      whatsappUrl,
-      messageText,
+      message: 'Promemoria Telegram inviato con successo',
+      messageText: messageHtml,
+      telegramLink,
+      confirmUrl,
       notificationsSentCount: doseLog.notificationsSentCount,
       recipientsCount: caregiversForPatient.length,
-      recipients: caregiversForPatient.map(c => ({ name: c.name, phone: c.phone }))
+      recipients: caregiversForPatient.map(c => ({
+        name: c.name,
+        email: c.email,
+        telegramChatId: c.telegramChatId,
+        telegramUsername: c.telegramUsername
+      })),
+      telegramDeliveryResults: telegramResults
     });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || 'Errore invio sollecito' });
+    return res.status(500).json({ error: err.message || 'Errore invio promemoria' });
+  }
+});
+
+// --------------------------------------------------------------------------
+// TELEGRAM BOT WEBHOOK & SYNC ENDPOINTS (@Guardian32170_bot)
+// --------------------------------------------------------------------------
+
+// Telegram Webhook endpoint
+app.post('/api/telegram/webhook', async (req, res) => {
+  try {
+    const update = req.body;
+    if (!update) return res.status(200).send('OK');
+
+    const msg = update.message || update.edited_message;
+    if (msg && msg.text) {
+      const text = msg.text.trim();
+      const chatId = String(msg.chat.id);
+      const username = msg.from?.username || msg.from?.first_name || '';
+
+      const match = text.match(/^\/start(?:=|\s+)?(.+)?$/i);
+      if (match) {
+        const candidateId = match[1]?.trim();
+        const db = dbInstance.getData();
+
+        if (candidateId) {
+          const targetUser = db.users.find(
+            u => u.id === candidateId || u.id.toLowerCase() === candidateId.toLowerCase() || u.email.toLowerCase() === candidateId.toLowerCase()
+          );
+
+          if (targetUser) {
+            targetUser.telegramChatId = chatId;
+            targetUser.telegramUsername = username;
+            targetUser.telegramConnectedAt = new Date().toISOString();
+            dbInstance.persist();
+
+            await sendTelegramMessage(
+              chatId,
+              `👋 <b>Ciao ${targetUser.name}!</b>\n\n` +
+              `✅ Il tuo account <b>CinicoCare</b> è stato collegato con successo al bot Guardian (<code>@${TELEGRAM_BOT_USERNAME}</code>).\n\n` +
+              `D'ora in poi riceverai direttamente qui su Telegram i promemoria e gli avvisi di somministrazione dei farmaci per i tuoi assistiti.`,
+              { parseMode: 'HTML' }
+            );
+          } else {
+            await sendTelegramMessage(
+              chatId,
+              `👋 Ciao! Codice utente CinicoCare non riconosciuto. Apri l'app CinicoCare e clicca su "Collega il tuo account Telegram" dal tuo profilo per collegarti automaticamente.`,
+              { parseMode: 'HTML' }
+            );
+          }
+        } else {
+          await sendTelegramMessage(
+            chatId,
+            `👋 Ciao! Sono il bot Guardian di <b>CinicoCare</b>.\n\nPer collegare il tuo account, accedi all'app CinicoCare e premi il pulsante <b>"Collega il tuo account Telegram"</b>.`,
+            { parseMode: 'HTML' }
+          );
+        }
+      }
+    }
+
+    return res.status(200).json({ ok: true });
+  } catch (e: any) {
+    console.error('Webhook error:', e);
+    return res.status(200).send('OK');
+  }
+});
+
+// Synchronize updates (polling fallback)
+app.get('/api/telegram/sync-updates', authenticate, async (req, res) => {
+  try {
+    const result = await processTelegramUpdates();
+    return res.json({ success: true, ...result });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Errore sincronizzazione Telegram' });
+  }
+});
+
+// Check if current user is linked to Telegram
+app.get('/api/telegram/check-link', authenticate, async (req, res) => {
+  try {
+    const user = (req as any).user as User;
+    // Trigger update scan
+    await processTelegramUpdates();
+
+    const db = dbInstance.getData();
+    const dbUser = db.users.find(u => u.id === user.id);
+
+    return res.json({
+      connected: Boolean(dbUser?.telegramChatId),
+      chatId: dbUser?.telegramChatId || null,
+      username: dbUser?.telegramUsername || null,
+      connectedAt: dbUser?.telegramConnectedAt || null,
+      botUsername: TELEGRAM_BOT_USERNAME,
+      deepLink: getTelegramDeepLink(user.id)
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Errore verifica stato Telegram' });
+  }
+});
+
+// Unlink Telegram account
+app.post('/api/telegram/unlink', authenticate, (req, res) => {
+  try {
+    const user = (req as any).user as User;
+    const targetUserId = req.body?.userId || user.id;
+
+    if (targetUserId !== user.id && user.role !== 'superadmin' && !user.isFamilyAdmin) {
+      return res.status(403).json({ error: 'Permessi non sufficienti' });
+    }
+
+    const db = dbInstance.getData();
+    const dbUser = db.users.find(u => u.id === targetUserId);
+    if (!dbUser) {
+      return res.status(404).json({ error: 'Utente non trovato' });
+    }
+
+    dbUser.telegramChatId = undefined;
+    dbUser.telegramUsername = undefined;
+    dbUser.telegramConnectedAt = undefined;
+
+    dbInstance.persist();
+    return res.json({ success: true, message: 'Account Telegram scollegato con successo' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Errore disconnessione Telegram' });
+  }
+});
+
+// Send test Telegram notification
+app.post('/api/telegram/send-test', authenticate, async (req, res) => {
+  try {
+    const currentUser = (req as any).user as User;
+    const { userId, chatId, text } = req.body;
+
+    const db = dbInstance.getData();
+    let targetChatId = chatId;
+    let recipientName = 'Destinatario';
+
+    if (userId) {
+      const u = db.users.find(usr => usr.id === userId);
+      if (u) {
+        targetChatId = u.telegramChatId;
+        recipientName = u.name;
+      }
+    } else if (!targetChatId && currentUser.telegramChatId) {
+      targetChatId = currentUser.telegramChatId;
+      recipientName = currentUser.name;
+    }
+
+    if (!targetChatId) {
+      return res.status(400).json({
+        error: 'L\'utente selezionato non ha ancora collegato il suo account Telegram. Clicca prima sul link per collegare il bot @' + TELEGRAM_BOT_USERNAME,
+        deepLink: getTelegramDeepLink(userId || currentUser.id)
+      });
+    }
+
+    const msg = text ||
+      `🔔 <b>Test Notifica CinicoCare</b>\n\n` +
+      `Ciao <b>${recipientName}</b>, questo è un messaggio di test inviato dal bot Guardian (<code>@${TELEGRAM_BOT_USERNAME}</code>).\n\n` +
+      `Il tuo account Telegram è configurato e pronto a ricevere i promemoria delle terapie!`;
+
+    const result = await sendTelegramMessage(targetChatId, msg, { parseMode: 'HTML' });
+
+    if (result.success) {
+      return res.json({
+        success: true,
+        message: 'Messaggio di test Telegram inviato con successo!',
+        messageId: result.messageId,
+        recipient: recipientName,
+        chatId: targetChatId
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: result.error || 'Invio Telegram fallito',
+        details: result.response
+      });
+    }
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Errore invio test Telegram' });
+  }
+});
+
+// --------------------------------------------------------------------------
+// ADMIN SIMULATION: EMAIL & TELEGRAM NOTIFICATIONS
+// --------------------------------------------------------------------------
+app.post('/api/admin/simulate-notification', authenticate, async (req, res) => {
+  try {
+    const currentUser = (req as any).user as User;
+    if (currentUser.role !== 'superadmin' && !currentUser.isFamilyAdmin) {
+      return res.status(403).json({ error: 'Accesso riservato agli amministratori' });
+    }
+
+    const {
+      targetUserId,
+      type, // 'registration_email' | 'therapy_reminder' | 'custom_telegram'
+      patientId,
+      therapyId,
+      customMessage
+    } = req.body;
+
+    const db = dbInstance.getData();
+    const targetUser = db.users.find(u => u.id === targetUserId);
+    if (!targetUser) {
+      return res.status(404).json({ error: 'Utente destinatario non trovato' });
+    }
+
+    const origin = req.headers.origin || 'https://cinicocare.vercel.app';
+    const deepLink = getTelegramDeepLink(targetUser.id);
+    const targetFamily = db.families.find(f => f.id === targetUser.familyId);
+
+    // 1. SIMULATE REGISTRATION EMAIL
+    if (type === 'registration_email') {
+      const emailData = generateRegistrationEmailHtml({
+        name: targetUser.name,
+        email: targetUser.email,
+        password: 'PasswordSceltaOProvvisoria!',
+        familyName: targetFamily?.name || 'Gruppo Famiglia CinicoCare',
+        userId: targetUser.id,
+        role: targetUser.role,
+        appUrl: origin
+      });
+
+      return res.json({
+        success: true,
+        type: 'registration_email',
+        recipient: {
+          id: targetUser.id,
+          name: targetUser.name,
+          email: targetUser.email,
+          role: targetUser.role,
+          telegramChatId: targetUser.telegramChatId || null
+        },
+        email: emailData,
+        telegramDeepLink: deepLink,
+        message: `Email di registrazione simulata per ${targetUser.name} (${targetUser.email})`
+      });
+    }
+
+    // 2. SIMULATE / SEND THERAPY REMINDER
+    const patient = patientId ? db.patients.find(p => p.id === patientId) : (db.patients[0] || null);
+    const therapy = therapyId ? db.therapies.find(t => t.id === therapyId) : (db.therapies[0] || null);
+
+    const scheduledTime = therapy?.timeSlots?.[0] || '08:30';
+    const confirmUrl = `${origin}?confirmDose=${therapy?.id || 'th1'}_${getTodayDateString()}_${scheduledTime}`;
+
+    const reminderHtml =
+      `🔔 <b>CinicoCare Promemoria Terapia (Simulazione)</b>\n\n` +
+      `Ciao <b>${targetUser.name}</b>, è ora del farmaco per <b>${patient ? patient.name : 'Assistito'}</b>!\n\n` +
+      `💊 <b>Farmaco:</b> ${therapy ? therapy.medicationName : 'Cardioaspirina'} ${therapy?.dosage ? `(${therapy.dosage})` : ''}\n` +
+      `⏰ <b>Orario:</b> ${scheduledTime}\n` +
+      (therapy?.instructions ? `📝 <b>Istruzioni:</b> ${therapy.instructions}\n\n` : '\n') +
+      `👉 <i>Tocca il pulsante qui sotto per confermare la somministrazione nell'App:</i>`;
+
+    const reminderEmailHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: sans-serif; background: #f8fafc; padding: 20px; color: #1e293b; }
+    .box { max-width: 550px; margin: auto; background: white; border-radius: 12px; padding: 24px; border: 1px solid #e2e8f0; }
+    .btn { display: inline-block; background: #0284c7; color: white !important; padding: 12px 20px; border-radius: 10px; text-decoration: none; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h2 style="color:#0369a1; margin-top:0;">🔔 Promemoria Terapia Farmaci</h2>
+    <p>Ciao <strong>${targetUser.name}</strong>, è ora della somministrazione farmaco per <strong>${patient ? patient.name : 'Assistito'}</strong>.</p>
+    <p>💊 <strong>Farmaco:</strong> ${therapy ? therapy.medicationName : 'Cardioaspirina'} ${therapy?.dosage ? `(${therapy.dosage})` : ''}</p>
+    <p>⏰ <strong>Orario previsto:</strong> ${scheduledTime}</p>
+    <div style="margin: 20px 0;">
+      <a href="${confirmUrl}" class="btn" target="_blank">✅ Conferma Somministrazione (1 Tocco)</a>
+    </div>
+    <hr style="border:none; border-top:1px solid #f1f5f9; margin: 20px 0;">
+    <p style="font-size:12px; color:#64748b;">Bot Telegram: <a href="${deepLink}">@${TELEGRAM_BOT_USERNAME}</a></p>
+  </div>
+</body>
+</html>
+    `.trim();
+
+    let telegramSentResult: any = null;
+
+    if (targetUser.telegramChatId) {
+      telegramSentResult = await sendTelegramMessage(
+        targetUser.telegramChatId,
+        customMessage || reminderHtml,
+        {
+          parseMode: 'HTML',
+          inlineKeyboard: [
+            [
+              {
+                text: '✅ Conferma Somministrazione',
+                url: confirmUrl
+              }
+            ]
+          ]
+        }
+      );
+    }
+
+    return res.json({
+      success: true,
+      type: type || 'therapy_reminder',
+      recipient: {
+        id: targetUser.id,
+        name: targetUser.name,
+        email: targetUser.email,
+        role: targetUser.role,
+        telegramChatId: targetUser.telegramChatId || null,
+        telegramConnected: Boolean(targetUser.telegramChatId)
+      },
+      email: {
+        subject: `Promemoria Farmaco: ${therapy ? therapy.medicationName : 'Terapia'} per ${patient ? patient.name : 'Assistito'}`,
+        html: reminderEmailHtml,
+        text: `Promemoria per ${targetUser.name}: somministrare ${therapy ? therapy.medicationName : 'Farmaco'} a ${patient ? patient.name : 'Assistito'} alle ${scheduledTime}. Conferma qui: ${confirmUrl}`
+      },
+      telegramMessage: customMessage || reminderHtml,
+      telegramDelivery: telegramSentResult || {
+        success: false,
+        note: 'Telegram non inviato: account non collegato (Chat ID assente)',
+        deepLink
+      },
+      confirmUrl,
+      telegramDeepLink: deepLink
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Errore simulazione notifica' });
   }
 });
 

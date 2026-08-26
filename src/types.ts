@@ -11,19 +11,22 @@ export interface User {
   isFamilyAdmin: boolean;
   gdprAccepted: boolean;
   gdprAcceptedAt?: string;
+  telegramChatId?: string;
+  telegramUsername?: string;
+  telegramConnectedAt?: string;
   createdAt: string;
 }
 
 export interface NotificationSettings {
-  whatsappEnabled: boolean;
   telegramEnabled: boolean;
   pushEnabled: boolean;
   soundAlarmEnabled: boolean;
   preAlertMinutes: number; // e.g. 15
   repeatIntervalMinutes: number; // e.g. 10
   autoRepeatNudges: boolean; // continua finché qualcuno non spunta
-  customWhatsappTemplate: string;
   customTelegramTemplate?: string;
+  customWhatsappTemplate?: string; // legacy fallback
+  whatsappEnabled?: boolean; // legacy fallback
   privacyDisclaimerMarkdown?: string;
 }
 

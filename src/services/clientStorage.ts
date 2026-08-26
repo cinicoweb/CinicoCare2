@@ -211,6 +211,8 @@ export class ClientStorageManager {
     name?: string;
     email?: string;
     phone?: string;
+    telegramChatId?: string;
+    telegramUsername?: string;
     currentPassword?: string;
     newPassword?: string;
   }): { user: User } {
@@ -232,6 +234,17 @@ export class ClientStorageManager {
     }
     if (payload.phone !== undefined) {
       user.phone = payload.phone.trim();
+    }
+    if (payload.telegramChatId !== undefined) {
+      user.telegramChatId = payload.telegramChatId ? payload.telegramChatId.trim() : undefined;
+      if (payload.telegramChatId && !user.telegramConnectedAt) {
+        user.telegramConnectedAt = new Date().toISOString();
+      } else if (!payload.telegramChatId) {
+        user.telegramConnectedAt = undefined;
+      }
+    }
+    if (payload.telegramUsername !== undefined) {
+      user.telegramUsername = payload.telegramUsername ? payload.telegramUsername.trim() : undefined;
     }
     if (payload.email && payload.email.trim()) {
       const cleanEmail = payload.email.toLowerCase().trim();
@@ -279,13 +292,22 @@ export class ClientStorageManager {
     }
 
     const family = db.families.find(f => f.id === user.familyId) || null;
-    const patients = db.patients.filter(p => p.familyId === user.familyId);
-    const therapies = db.therapies.filter(t => t.familyId === user.familyId);
-    const doseLogs = db.doseLogs.filter(d => d.familyId === user.familyId);
+    let patients = db.patients.filter(p => p.familyId === user.familyId);
+    let therapies = db.therapies.filter(t => t.familyId === user.familyId);
+    let doseLogs = db.doseLogs.filter(d => d.familyId === user.familyId);
     const members = db.users
       .filter(u => u.familyId === user.familyId)
       .map(({ passwordHash, ...u }) => u);
     const invitations = db.invitations.filter(i => i.familyId === user.familyId);
+
+    // Strict Caregiver Visibility Filter
+    const isCaregiver = user.role === 'caregiver' || !user.isFamilyAdmin;
+    if (isCaregiver) {
+      const assignedIds = new Set(user.assignedPatientIds || []);
+      patients = patients.filter(p => assignedIds.has(p.id));
+      therapies = therapies.filter(t => assignedIds.has(t.patientId));
+      doseLogs = doseLogs.filter(d => assignedIds.has(d.patientId));
+    }
 
     return {
       user: sanitizedUser,

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, User as UserIcon, Mail, Phone, Lock, Check, AlertCircle, ShieldCheck, Key } from 'lucide-react';
+import { X, User as UserIcon, Mail, Phone, Lock, Check, AlertCircle, Key, Bot, ExternalLink, RefreshCw, Unlink } from 'lucide-react';
 import { User } from '../types';
 import { api } from '../services/api';
 import { validatePasswordWithConfirmation } from '../utils/security';
@@ -26,10 +26,58 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changePasswordMode, setChangePasswordMode] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [syncingTg, setSyncingTg] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
+
+  const telegramLink = api.getTelegramDeepLink(user.id);
+
+  const handleSyncTelegram = async () => {
+    setSyncingTg(true);
+    setError(null);
+    try {
+      await api.syncTelegramUpdates();
+      const status = await api.checkTelegramStatus();
+      if (status.connected) {
+        const updated = {
+          ...user,
+          telegramChatId: status.chatId || user.telegramChatId,
+          telegramUsername: status.username || user.telegramUsername,
+          telegramConnectedAt: status.connectedAt || user.telegramConnectedAt
+        };
+        onUserUpdated(updated);
+        setSuccessMsg('Account Telegram collegato e sincronizzato!');
+      } else {
+        setSuccessMsg('Nessun nuovo messaggio di avvio rilevato. Clicca su "Collega il tuo account Telegram" e premi "Avvia" nel bot @Guardian32170_bot.');
+      }
+    } catch (e: any) {
+      setError(e.message || 'Errore sincronizzazione Telegram');
+    } finally {
+      setSyncingTg(false);
+    }
+  };
+
+  const handleUnlinkTelegram = async () => {
+    if (!confirm('Sei sicuro di voler scollegare Telegram? Non riceverai più notifiche su @Guardian32170_bot.')) return;
+    setSaving(true);
+    try {
+      await api.unlinkTelegram(user.id);
+      const updated = {
+        ...user,
+        telegramChatId: undefined,
+        telegramUsername: undefined,
+        telegramConnectedAt: undefined
+      };
+      onUserUpdated(updated);
+      setSuccessMsg('Account Telegram scollegato.');
+    } catch (e: any) {
+      setError(e.message || 'Errore durante la disconnessione');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,7 +152,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
+        <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs max-h-[80vh] overflow-y-auto">
           {error && (
             <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 flex items-start gap-2">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -118,6 +166,84 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               <span>{successMsg}</span>
             </div>
           )}
+
+          {/* TELEGRAM BOT CONNECTION CARD */}
+          <div className="p-4 bg-gradient-to-br from-sky-50 to-cyan-50/70 rounded-2xl border border-sky-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-sky-600 text-white rounded-xl">
+                  <Bot className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-900 text-xs font-['Outfit']">Notifiche Telegram Bot</h4>
+                  <p className="text-[10px] text-sky-800">Bot ufficiale @Guardian32170_bot</p>
+                </div>
+              </div>
+
+              {user.telegramChatId ? (
+                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-md text-[10px] font-bold flex items-center gap-1">
+                  <Check className="w-3 h-3" /> Collegato
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-md text-[10px] font-bold">
+                  Non Collegato
+                </span>
+              )}
+            </div>
+
+            {user.telegramChatId ? (
+              <div className="space-y-2 pt-1 text-[11px] text-slate-700">
+                <p>
+                  ✅ Il tuo account è collegato a Telegram {user.telegramUsername ? `(@${user.telegramUsername})` : ''}. Riceverai i solleciti dei farmaci in tempo reale con tasto di conferma rapido.
+                </p>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleSyncTelegram}
+                    disabled={syncingTg}
+                    className="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold text-[11px] flex items-center gap-1 transition-colors"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${syncingTg ? 'animate-spin' : ''}`} />
+                    Verifica Stato
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleUnlinkTelegram}
+                    className="px-3 py-1.5 bg-slate-200 hover:bg-rose-100 hover:text-rose-700 text-slate-700 rounded-lg font-semibold text-[11px] flex items-center gap-1 transition-colors"
+                  >
+                    <Unlink className="w-3 h-3" />
+                    Scollega
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2.5 pt-1 text-[11px] text-slate-700">
+                <p className="leading-relaxed">
+                  Collega il bot Telegram per ricevere allarmi, promemoria dei farmaci e confermare le somministrazioni a 1 tocco:
+                </p>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <a
+                    href={telegramLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex-1 py-2 px-3 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-xs transition-colors text-center"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Collega il tuo account Telegram
+                  </a>
+                  <button
+                    type="button"
+                    onClick={handleSyncTelegram}
+                    disabled={syncingTg}
+                    className="py-2 px-3 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold rounded-xl flex items-center justify-center gap-1 transition-colors"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${syncingTg ? 'animate-spin' : ''}`} />
+                    Verifica
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           <div>
             <label className="block font-semibold text-slate-700 mb-1">Nome e Cognome *</label>
@@ -149,7 +275,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           </div>
 
           <div>
-            <label className="block font-semibold text-slate-700 mb-1">Numero Cellulare (per notifiche WhatsApp)</label>
+            <label className="block font-semibold text-slate-700 mb-1">Numero Cellulare (opzionale per reperibilità)</label>
             <div className="relative">
               <Phone className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
               <input
@@ -250,4 +376,5 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     </div>
   );
 };
+
 

@@ -10,13 +10,17 @@ import {
   RefreshCw,
   CheckCircle,
   Building,
-  Lock,
-  Search,
-  UserCheck,
   Key,
   Download,
   Upload,
-  Check
+  Check,
+  Send,
+  Mail,
+  Bot,
+  ExternalLink,
+  Sparkles,
+  Eye,
+  CheckCheck
 } from 'lucide-react';
 import { api } from '../services/api';
 
@@ -41,12 +45,25 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
   const [resetting, setResetting] = useState(false);
   const [resetSuccessMsg, setResetSuccessMsg] = useState<string | null>(null);
 
+  // Notification Simulator state
+  const [simTargetUserId, setSimTargetUserId] = useState<string>('');
+  const [simType, setSimType] = useState<'registration_email' | 'therapy_reminder' | 'custom_telegram'>('registration_email');
+  const [simCustomMessage, setSimCustomMessage] = useState<string>('');
+  const [simRunning, setSimRunning] = useState(false);
+  const [simResult, setSimResult] = useState<any>(null);
+  const [simFeedback, setSimFeedback] = useState<string | null>(null);
+
   const fetchOverview = async () => {
     setLoading(true);
     setError(null);
     try {
       const data = await api.getAdminOverview();
       setOverview(data);
+      if (data?.allUsers?.length && !simTargetUserId) {
+        // Default to first caregiver or first user
+        const firstCaregiver = data.allUsers.find((u: any) => u.role === 'caregiver') || data.allUsers[0];
+        if (firstCaregiver) setSimTargetUserId(firstCaregiver.id);
+      }
     } catch (err: any) {
       setError(err.message || 'Errore caricamento pannello amministratore');
     } finally {
@@ -125,6 +142,53 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  // Run Simulation
+  const handleRunSimulation = async () => {
+    if (!simTargetUserId) {
+      alert('Seleziona un utente destinatario');
+      return;
+    }
+    setSimRunning(true);
+    setSimFeedback(null);
+    try {
+      const result = await api.simulateAdminNotification({
+        targetUserId: simTargetUserId,
+        type: simType,
+        customMessage: simCustomMessage.trim() || undefined
+      });
+      setSimResult(result);
+      setSimFeedback('Simulazione completata con successo! Visualizza i dettagli e le anteprime sottostanti.');
+    } catch (err: any) {
+      alert(err.message || 'Errore durante la simulazione');
+    } finally {
+      setSimRunning(false);
+    }
+  };
+
+  // Send Direct Telegram Test Message
+  const handleSendLiveTelegramTest = async () => {
+    if (!simTargetUserId) return;
+    const targetUser = overview?.allUsers?.find((u: any) => u.id === simTargetUserId);
+    if (!targetUser?.telegramChatId) {
+      alert('Questo utente non ha ancora collegato il bot Telegram (@Guardian32170_bot). Può collegarlo aprendo il suo link univoco: ' + api.getTelegramDeepLink(simTargetUserId));
+      return;
+    }
+
+    setSimRunning(true);
+    try {
+      const text = simCustomMessage.trim() || `🔔 <b>Test Notifica CinicoCare</b>\n\nCiao ${targetUser.name}, questo è un messaggio di test inviato dal Pannello Amministratore tramite @Guardian32170_bot.`;
+      const res = await api.sendTelegramTest({
+        userId: simTargetUserId,
+        text
+      });
+      alert(res.message || 'Messaggio inviato su Telegram con successo!');
+    } catch (e: any) {
+      alert('Errore invio Telegram: ' + e.message);
+    } finally {
+      setSimRunning(false);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       
@@ -138,7 +202,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
             <h2 className="text-xl font-bold font-['Outfit']">Pannello Amministratore Generale</h2>
           </div>
           <p className="text-xs text-slate-300 mt-1">
-            Supervisione globale della piattaforma CinicoCare, sicurezza account, backup e gestione database.
+            Supervisione globale della piattaforma CinicoCare, simulatore notifiche Telegram/Email, sicurezza account e backup database.
           </p>
         </div>
 
@@ -237,6 +301,180 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
             </div>
           </div>
 
+          {/* NOTIFICATION & TELEGRAM SIMULATOR (USER REQUEST) */}
+          <div className="bg-white rounded-2xl p-6 border border-sky-200 shadow-sm space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-sky-100 text-sky-700 rounded-lg">
+                    <Bot className="w-5 h-5" />
+                  </div>
+                  <h3 className="font-bold text-slate-900 text-base font-['Outfit']">
+                    Simulatore Notifiche Mail & Telegram Caregiver
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Testa e simula l'invio delle email di benvenuto con link Telegram univoco o delle notifiche push del bot @Guardian32170_bot per qualsiasi caregiver.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] bg-sky-50 text-sky-800 border border-sky-200 font-bold px-2.5 py-1 rounded-lg">
+                  Bot: @Guardian32170_bot
+                </span>
+              </div>
+            </div>
+
+            {simFeedback && (
+              <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs font-semibold flex items-center gap-2">
+                <CheckCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{simFeedback}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Target Caregiver selection */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                  Seleziona Caregiver / Utente Destinatario
+                </label>
+                <select
+                  value={simTargetUserId}
+                  onChange={(e) => setSimTargetUserId(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-sky-600 outline-none text-xs"
+                >
+                  {overview?.allUsers?.map((u: any) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} ({u.role}) - {u.email} {u.telegramChatId ? '[Telegram ✅]' : '[Telegram ❌]'}
+                    </option>
+                  ))}
+                </select>
+                {simTargetUserId && (
+                  <div className="mt-2 text-[11px] text-slate-500 flex items-center gap-1">
+                    <span>Link Deep Link:</span>
+                    <a
+                      href={api.getTelegramDeepLink(simTargetUserId)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sky-600 hover:underline font-mono font-bold truncate"
+                    >
+                      {api.getTelegramDeepLink(simTargetUserId)}
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              {/* Simulation Type */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                  Tipologia Notifica da Simulare
+                </label>
+                <select
+                  value={simType}
+                  onChange={(e: any) => setSimType(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-sky-600 outline-none text-xs"
+                >
+                  <option value="registration_email">
+                    ✉️ Email Registrazione + Link Collegamento Telegram
+                  </option>
+                  <option value="therapy_reminder">
+                    🔔 Promemoria Terapia / Sollecito Caregiver Telegram
+                  </option>
+                  <option value="custom_telegram">
+                    💬 Messaggio Test Telegram Libero (@Guardian32170_bot)
+                  </option>
+                </select>
+              </div>
+
+              {/* Optional Custom message */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                  Messaggio Personalizzato (Opzionale)
+                </label>
+                <input
+                  type="text"
+                  value={simCustomMessage}
+                  onChange={(e) => setSimCustomMessage(e.target.value)}
+                  placeholder="Es. Attenzione: aggiornamento terapia..."
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-sky-600 outline-none text-xs"
+                />
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleRunSimulation}
+                disabled={simRunning || !simTargetUserId}
+                className="px-4 py-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs transition-colors"
+              >
+                <Sparkles className="w-4 h-4" />
+                {simRunning ? 'Elaborazione...' : 'Esegui Simulazione Notifica'}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSendLiveTelegramTest}
+                disabled={simRunning || !simTargetUserId}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs transition-colors"
+              >
+                <Send className="w-4 h-4" />
+                Invia Test Reale su Telegram Bot
+              </button>
+            </div>
+
+            {/* Simulation Preview & Result Container */}
+            {simResult && (
+              <div className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-4 animate-fade-in">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                    <Eye className="w-4 h-4 text-sky-700" />
+                    Risultato Simulazione per: {simResult.recipient?.name} ({simResult.recipient?.email})
+                  </span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                    simResult.recipient?.telegramConnected
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {simResult.recipient?.telegramConnected ? 'Telegram Connesso' : 'Telegram Non Connesso'}
+                  </span>
+                </div>
+
+                {simResult.email && (
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <Mail className="w-4 h-4 text-sky-600" />
+                      Oggetto Email: <span className="font-semibold text-slate-900">{simResult.email.subject}</span>
+                    </div>
+                    <div className="p-3 bg-white rounded-lg border border-slate-200 text-xs text-slate-700 max-h-60 overflow-y-auto">
+                      <div dangerouslySetInnerHTML={{ __html: simResult.email.html }} />
+                    </div>
+                  </div>
+                )}
+
+                {simResult.telegramMessage && (
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <Bot className="w-4 h-4 text-sky-600" />
+                      Testo Notifica Bot Telegram:
+                    </div>
+                    <div
+                      className="p-3 bg-white rounded-lg border border-slate-200 text-xs text-slate-800 font-mono whitespace-pre-wrap"
+                      dangerouslySetInnerHTML={{ __html: simResult.telegramMessage }}
+                    />
+                  </div>
+                )}
+
+                {simResult.telegramDelivery && (
+                  <div className="text-[11px] text-slate-600 bg-white p-2 rounded-lg border border-slate-200">
+                    <strong>Esito Consegna Telegram Bot:</strong> {simResult.telegramDelivery.success ? '✅ Consegnato' : `⚠️ Non recapitato (${simResult.telegramDelivery.reason || 'Chat ID non configurato'})`}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Backup & Persistence Section */}
           <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -323,9 +561,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
                   <tr className="border-b border-slate-200 text-slate-400 uppercase text-[10px] tracking-wider">
                     <th className="pb-3 font-bold">Nome</th>
                     <th className="pb-3 font-bold">Email</th>
-                    <th className="pb-3 font-bold">Telefono</th>
+                    <th className="pb-3 font-bold">Telegram Bot</th>
                     <th className="pb-3 font-bold">Ruolo</th>
                     <th className="pb-3 font-bold">Famiglia di Appartenenza</th>
+                    <th className="pb-3 font-bold">Link Univoco Bot</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -333,7 +572,17 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
                     <tr key={u.id} className="hover:bg-slate-50 transition-colors">
                       <td className="py-3 font-bold text-slate-900">{u.name}</td>
                       <td className="py-3 text-slate-600">{u.email}</td>
-                      <td className="py-3 text-slate-600">{u.phone || '-'}</td>
+                      <td className="py-3">
+                        {u.telegramChatId ? (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-800 flex items-center gap-1 w-max">
+                            <Check className="w-3 h-3" /> Collegato {u.telegramUsername ? `(@${u.telegramUsername})` : ''}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-500">
+                            Non Collegato
+                          </span>
+                        )}
+                      </td>
                       <td className="py-3">
                         <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
                           u.role === 'superadmin'
@@ -346,6 +595,16 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
                         </span>
                       </td>
                       <td className="py-3 text-slate-700 font-medium">{u.familyName}</td>
+                      <td className="py-3 font-mono text-[10px]">
+                        <a
+                          href={api.getTelegramDeepLink(u.id)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sky-600 hover:text-sky-800 hover:underline flex items-center gap-1"
+                        >
+                          <ExternalLink className="w-3 h-3" /> t.me/Guardian32170_bot?start={u.id}
+                        </a>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -459,3 +718,4 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
     </div>
   );
 };
+

@@ -260,7 +260,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <p className="leading-relaxed text-[11px]">
                     <strong>Creazione Nuovo Gruppo Famiglia:</strong> Compila i campi sottostanti per iniziare ad amministrare il tuo gruppo.
                     <span className="block mt-1 text-slate-600">
-                      *Vuoi unirti a una famiglia già esistente? Chiedi all'amministratore di quella famiglia di inviarti un link d'invito via email, WhatsApp o Telegram.*
+                      *Vuoi unirti a una famiglia già esistente? Chiedi all'amministratore di quella famiglia di inviarti un link d'invito via email o messaggio.*
                     </span>
                   </p>
                 </div>
@@ -328,7 +328,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Cellulare (per WhatsApp)</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Cellulare (opzionale)</label>
                   <div className="relative">
                     <Phone className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
                     <input

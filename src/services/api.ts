@@ -310,6 +310,8 @@ export const api = {
     name?: string;
     email?: string;
     phone?: string;
+    telegramChatId?: string;
+    telegramUsername?: string;
     currentPassword?: string;
     newPassword?: string;
   }): Promise<{ user: User }> {
@@ -329,6 +331,17 @@ export const api = {
 
       if (payload.name) updates.name = payload.name.trim();
       if (payload.phone !== undefined) updates.phone = payload.phone.trim();
+      if (payload.telegramChatId !== undefined) {
+        updates.telegramChatId = payload.telegramChatId ? payload.telegramChatId.trim() : null;
+        if (payload.telegramChatId && !existingData.telegramConnectedAt) {
+          updates.telegramConnectedAt = new Date().toISOString();
+        } else if (!payload.telegramChatId) {
+          updates.telegramConnectedAt = null;
+        }
+      }
+      if (payload.telegramUsername !== undefined) {
+        updates.telegramUsername = payload.telegramUsername ? payload.telegramUsername.trim() : null;
+      }
       if (payload.email) updates.email = payload.email.toLowerCase().trim();
 
       if (payload.newPassword) {
@@ -432,16 +445,26 @@ export const api = {
         ]);
 
       const family = familySnap.exists() ? (familySnap.data() as Family) : null;
-      const patients = patientsSnap.docs.map(d => d.data() as Patient);
-      const therapies = therapiesSnap.docs.map(d => d.data() as Therapy);
+      let patients = patientsSnap.docs.map(d => d.data() as Patient);
+      let therapies = therapiesSnap.docs.map(d => d.data() as Therapy);
       const members = membersSnap.docs
         .map(d => {
           const { passwordHash, ...u } = d.data() as any;
           return u as User;
         })
         .filter(u => u.role !== 'superadmin');
-      const doseLogs = doseLogsSnap.docs.map(d => d.data() as DoseLog);
+      let doseLogs = doseLogsSnap.docs.map(d => d.data() as DoseLog);
       const invitations = invSnap.docs.map(d => d.data() as Invitation);
+
+      // STRICT CAREGIVER VISIBILITY:
+      // Caregivers (and users who are not family admins) only see their assigned patients and therapies.
+      const isCaregiver = currentUser.role === 'caregiver' || !currentUser.isFamilyAdmin;
+      if (isCaregiver) {
+        const assignedIds = new Set(currentUser.assignedPatientIds || []);
+        patients = patients.filter(p => assignedIds.has(p.id));
+        therapies = therapies.filter(t => assignedIds.has(t.patientId));
+        doseLogs = doseLogs.filter(d => assignedIds.has(d.patientId));
+      }
 
       return {
         user: currentUser,
@@ -843,7 +866,183 @@ export const api = {
   },
 
   // --------------------------------------------------------------------------
-  // WHATSAPP & TELEGRAM NUDGES / CAREGIVER NOTIFICATIONS
+  // TELEGRAM BOT INTEGRATION (@Guardian32170_bot)
+  // --------------------------------------------------------------------------
+  getTelegramBotUsername(): string {
+    return 'Guardian32170_bot';
+  },
+
+  getTelegramDeepLink(userId: string): string {
+    if (!userId) return 'https://t.me/Guardian32170_bot';
+    return `https://t.me/Guardian32170_bot?start=${userId.trim()}`;
+  },
+
+  async checkTelegramStatus(): Promise<{
+    connected: boolean;
+    chatId: string | null;
+    username: string | null;
+    connectedAt: string | null;
+    botUsername: string;
+    deepLink: string;
+  }> {
+    const token = this.getToken();
+    if (token) {
+      try {
+        const res = await fetch('/api/telegram/check-link', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          return await res.json();
+        }
+      } catch (e) {
+        console.warn('Backend telegram check failed:', e);
+      }
+    }
+
+    const currentUserId = this.getCurrentUserId();
+    const user = currentUserId ? ClientStorageManager.getDB().users.find(u => u.id === currentUserId) : null;
+    return {
+      connected: Boolean(user?.telegramChatId),
+      chatId: user?.telegramChatId || null,
+      username: user?.telegramUsername || null,
+      connectedAt: user?.telegramConnectedAt || null,
+      botUsername: 'Guardian32170_bot',
+      deepLink: this.getTelegramDeepLink(currentUserId || '')
+    };
+  },
+
+  async syncTelegramUpdates(): Promise<{ processedCount: number; linkedUsers: string[] }> {
+    const token = this.getToken();
+    if (token) {
+      try {
+        const res = await fetch('/api/telegram/sync-updates', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          return await res.json();
+        }
+      } catch (e) {
+        console.warn('Backend telegram sync failed:', e);
+      }
+    }
+    return { processedCount: 0, linkedUsers: [] };
+  },
+
+  async unlinkTelegram(userId?: string): Promise<{ success: boolean; message: string }> {
+    const token = this.getToken();
+    if (token) {
+      try {
+        const res = await fetch('/api/telegram/unlink', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ userId })
+        });
+        if (res.ok) return await res.json();
+      } catch (e) {
+        console.warn('Backend unlink failed:', e);
+      }
+    }
+
+    const targetId = userId || this.getCurrentUserId();
+    if (targetId) {
+      ClientStorageManager.updateProfile({ telegramChatId: '', telegramUsername: '' });
+    }
+    return { success: true, message: 'Account Telegram scollegato con successo' };
+  },
+
+  async sendTelegramTest(payload: {
+    userId?: string;
+    chatId?: string;
+    text?: string;
+  }): Promise<{ success: boolean; message: string; messageId?: number; recipient?: string }> {
+    const token = this.getToken();
+    if (token) {
+      const res = await fetch('/api/telegram/send-test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Errore invio notifica Telegram');
+      return data;
+    }
+
+    return {
+      success: true,
+      message: 'Simulazione locale invio messaggio Telegram a ' + (payload.userId || 'utente corrente')
+    };
+  },
+
+  // --------------------------------------------------------------------------
+  // ADMIN SIMULATION (EMAIL & TELEGRAM NOTIFICATION TO ANY CAREGIVER)
+  // --------------------------------------------------------------------------
+  async simulateAdminNotification(payload: {
+    targetUserId: string;
+    type: 'registration_email' | 'therapy_reminder' | 'custom_telegram';
+    patientId?: string;
+    therapyId?: string;
+    customMessage?: string;
+  }): Promise<{
+    success: boolean;
+    type: string;
+    recipient: any;
+    email?: { subject: string; html: string; text: string };
+    telegramMessage?: string;
+    telegramDelivery?: any;
+    confirmUrl?: string;
+    telegramDeepLink?: string;
+    message?: string;
+  }> {
+    const token = this.getToken();
+    if (token) {
+      const res = await fetch('/api/admin/simulate-notification', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Errore simulazione notifica');
+      return data;
+    }
+
+    // Client fallback simulation
+    const dbLocal = ClientStorageManager.getDB();
+    const targetUser = dbLocal.users.find(u => u.id === payload.targetUserId);
+    if (!targetUser) throw new Error('Utente destinatario non trovato');
+
+    const deepLink = this.getTelegramDeepLink(targetUser.id);
+    return {
+      success: true,
+      type: payload.type,
+      recipient: {
+        id: targetUser.id,
+        name: targetUser.name,
+        email: targetUser.email,
+        role: targetUser.role,
+        telegramChatId: targetUser.telegramChatId || null,
+        telegramConnected: Boolean(targetUser.telegramChatId)
+      },
+      email: {
+        subject: 'Simulazione Notifica CinicoCare',
+        html: `<p>Simulazione per ${targetUser.name}. Link Telegram: <a href="${deepLink}">${deepLink}</a></p>`,
+        text: `Simulazione per ${targetUser.name}. Link Telegram: ${deepLink}`
+      },
+      telegramDeepLink: deepLink,
+      message: `Simulazione creata per ${targetUser.name}`
+    };
+  },
+
+  // --------------------------------------------------------------------------
+  // TELEGRAM NUDGES & CAREGIVER NOTIFICATIONS
   // --------------------------------------------------------------------------
   async nudgeDose(payload: {
     therapyId: string;
@@ -852,15 +1051,42 @@ export const api = {
     scheduledTime: string;
     targetPhone?: string;
     caregiverName?: string;
-    channel?: 'whatsapp' | 'telegram' | 'push' | 'all';
+    channel?: 'telegram' | 'push' | 'all';
   }): Promise<{
     success: boolean;
-    whatsappUrl: string;
     telegramUrl: string;
     messageText: string;
     notificationsSentCount: number;
     recipientsCount: number;
+    telegramDeliveryResults?: any[];
   }> {
+    const token = this.getToken();
+    if (token) {
+      try {
+        const res = await fetch('/api/doses/nudge', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          const data = await res.json();
+          return {
+            success: true,
+            telegramUrl: data.telegramLink || this.getTelegramDeepLink(this.getCurrentUserId() || ''),
+            messageText: data.messageText,
+            notificationsSentCount: data.notificationsSentCount,
+            recipientsCount: data.recipientsCount,
+            telegramDeliveryResults: data.telegramDeliveryResults
+          };
+        }
+      } catch (e) {
+        console.warn('Backend nudge error, fallback to firestore/local:', e);
+      }
+    }
+
     const doseId = `${payload.therapyId}_${payload.scheduledDate}_${payload.scheduledTime}`;
     const doseRef = doc(db, 'doseLogs', doseId);
 
@@ -917,17 +1143,14 @@ export const api = {
         confirmUrl
       });
 
-      const formattedPhone = payload.targetPhone ? formatPhoneNumber(payload.targetPhone) : '';
-      const whatsappUrl = buildWhatsAppShareUrl(formattedPhone, messageText);
       const telegramUrl = buildTelegramShareUrl(messageText);
 
       return {
         success: true,
-        whatsappUrl,
         telegramUrl,
         messageText,
         notificationsSentCount: sentCount,
-        recipientsCount: formattedPhone ? 1 : 0
+        recipientsCount: 1
       };
     } catch (e) {
       return ClientStorageManager.nudgeDose(payload);
