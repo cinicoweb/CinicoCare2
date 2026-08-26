@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="primaryGrad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#0f766e" />
+    </linearGradient>
+    <linearGradient id="pillGrad" x1="160" y1="160" x2="352" y2="352" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#2dd4bf" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#primaryGrad)" />
+  <!-- Protective hands / heart backdrop -->
+  <path d="M256 390s-120-74-120-154c0-44 36-80 80-80 24 0 40 12 40 12s16-12 40-12c44 0 80 36 80 80 0 80-120 154-120 154z" fill="#ffffff" fill-opacity="0.18"/>
+  <!-- Cross and Pill symbol -->
+  <g transform="translate(256, 256)">
+    <!-- Medical Cross -->
+    <rect x="-24" y="-90" width="48" height="180" rx="16" fill="#ffffff" />
+    <rect x="-90" y="-24" width="180" height="48" rx="16" fill="#ffffff" />
+    <!-- Center Pill Accent -->
+    <circle cx="0" cy="0" r="32" fill="#0284c7" />
+    <path d="M-12 -6L12 6" stroke="#ffffff" stroke-width="6" stroke-linecap="round" />
+    <path d="M-6 12L-12 -6" stroke="#38bdf8" stroke-width="4" stroke-linecap="round" />
+  </g>
+</svg>

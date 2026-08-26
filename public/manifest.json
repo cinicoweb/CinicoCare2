@@ -1,0 +1,25 @@
+{
+  "name": "CinicoCare - Gestione Somministrazione Farmaci",
+  "short_name": "CinicoCare",
+  "description": "App per la gestione coordinata della somministrazione farmaci in gruppi famiglia chiusi, con solleciti continui e avvisi WhatsApp e Push.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0284c7",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

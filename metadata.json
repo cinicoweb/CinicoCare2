@@ -1,0 +1,6 @@
+{
+  "name": "CinicoCare - Gestione Farmaci, Famiglie & Caregiver",
+  "description": "Applicazione ideata e realizzata da Nicola Cirillo (copyright 2026, CC BY-NC-ND) per la gestione coordinata della somministrazione farmaci in gruppi famiglia chiusi, con assegnazione specifica pazienti, avvisi WhatsApp e notifiche push.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

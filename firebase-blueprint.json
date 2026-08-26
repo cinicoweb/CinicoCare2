@@ -1,0 +1,127 @@
+{
+  "entities": {
+    "User": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "role": { "type": "string", "enum": ["superadmin", "familiare", "caregiver"] },
+        "familyId": { "type": "string" },
+        "assignedPatientIds": { "type": "array", "items": { "type": "string" } },
+        "isFamilyAdmin": { "type": "boolean" },
+        "gdprAccepted": { "type": "boolean" },
+        "gdprAcceptedAt": { "type": "string" },
+        "passwordHash": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "email", "name", "role", "createdAt"]
+    },
+    "Family": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "notificationSettings": { "type": "object" }
+      },
+      "required": ["id", "name", "code", "createdAt"]
+    },
+    "Patient": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "familyId": { "type": "string" },
+        "name": { "type": "string" },
+        "birthDate": { "type": "string" },
+        "notes": { "type": "string" },
+        "assignedCaregiverIds": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "familyId", "name", "createdAt"]
+    },
+    "Therapy": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "familyId": { "type": "string" },
+        "patientId": { "type": "string" },
+        "medicationName": { "type": "string" },
+        "dosage": { "type": "string" },
+        "instructions": { "type": "string" },
+        "timeSlots": { "type": "array", "items": { "type": "string" } },
+        "daysOfWeek": { "type": "array", "items": { "type": "number" } },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "color": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "familyId", "patientId", "medicationName", "dosage", "timeSlots", "daysOfWeek", "startDate", "isActive", "createdAt"]
+    },
+    "DoseLog": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "familyId": { "type": "string" },
+        "therapyId": { "type": "string" },
+        "patientId": { "type": "string" },
+        "scheduledDate": { "type": "string" },
+        "scheduledTime": { "type": "string" },
+        "status": { "type": "string", "enum": ["taken", "skipped", "pending"] },
+        "takenAt": { "type": "string" },
+        "takenByUserId": { "type": "string" },
+        "takenByUserName": { "type": "string" },
+        "notes": { "type": "string" },
+        "notificationsSentCount": { "type": "number" },
+        "lastNotifiedAt": { "type": "string" }
+      },
+      "required": ["id", "familyId", "therapyId", "patientId", "scheduledDate", "scheduledTime", "status"]
+    },
+    "Invitation": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "familyId": { "type": "string" },
+        "inviterName": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "role": { "type": "string", "enum": ["familiare", "caregiver"] },
+        "assignedPatientIds": { "type": "array", "items": { "type": "string" } },
+        "token": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "expired"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "familyId", "token", "role", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and credentials"
+    },
+    "/families/{familyId}": {
+      "schema": "Family",
+      "description": "Family groups and notification settings"
+    },
+    "/patients/{patientId}": {
+      "schema": "Patient",
+      "description": "Registered patients under family groups"
+    },
+    "/therapies/{therapyId}": {
+      "schema": "Therapy",
+      "description": "Medication schedules and therapy definitions"
+    },
+    "/doseLogs/{doseId}": {
+      "schema": "DoseLog",
+      "description": "Dose administration checks and confirmations"
+    },
+    "/invitations/{invitationId}": {
+      "schema": "Invitation",
+      "description": "Smart invitations to join family care teams"
+    }
+  }
+}
