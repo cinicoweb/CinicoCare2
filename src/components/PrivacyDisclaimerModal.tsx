@@ -47,7 +47,7 @@ export const PrivacyDisclaimerModal: React.FC<PrivacyDisclaimerModalProps> = ({ 
               <strong>CinicoCare è unicamente uno strumento di ausilio digitale e promemoria organizzativo</strong> per supportare la coordinazione tra familiari e caregiver.
             </p>
             <ul className="space-y-1.5 list-disc list-inside text-xs text-amber-900">
-              <li><strong>Nessun valore medico-diagnostico:</strong> L'applicazione <u>NON è un dispositivo medico</u> né certificato ai fini sanitari. Non fornisce pareri medici, dosaggi automatici né diagnosi.</li>
+              <li><strong>Nessun valore medico-diagnostico:</strong> L'applicazione <u>NON è un dispositivo medico </u> né certificato ai fini sanitari. Non fornisce pareri medici, dosaggi automatici né diagnosi.</li>
               <li><strong>Responsabilità esclusiva dell'utilizzatore:</strong> La somministrazione dei farmaci, la verifica dei dosaggi, gli orari e la conformità al piano terapeutico prescritto restano <u>esclusiva e inderogabile responsabilità del paziente, del caregiver e del medico curante</u>.</li>
               <li><strong>Assenza di garanzia e malfunzionamenti:</strong> L'autore (Nicola Cirillo) non assume alcuna responsabilità civile, penale o patrimoniale per omissioni, ritardi nella somministrazione, mancata ricezione di messaggi/notifiche WhatsApp/Push, interruzioni di connettività, errori di inserimento dati o disservizi tecnici.</li>
             </ul>
