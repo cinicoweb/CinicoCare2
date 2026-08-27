@@ -18,12 +18,13 @@ export interface User {
 }
 
 export interface NotificationSettings {
+  emailEnabled?: boolean;
   telegramEnabled: boolean;
   pushEnabled: boolean;
   soundAlarmEnabled: boolean;
   preAlertMinutes: number; // e.g. 15
-  repeatIntervalMinutes: number; // e.g. 10
-  autoRepeatNudges: boolean; // continua finché qualcuno non spunta
+  repeatIntervalMinutes: number; // 1 to 60 minutes
+  autoRepeatNudges: boolean; // continua finché qualcuno non somministra o salta
   customTelegramTemplate?: string;
   customWhatsappTemplate?: string; // legacy fallback
   whatsappEnabled?: boolean; // legacy fallback

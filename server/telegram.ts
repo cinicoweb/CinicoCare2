@@ -74,6 +74,8 @@ export async function sendTelegramMessage(
   }
 }
 
+let lastUpdateOffset = 0;
+
 /**
  * Polling and processing Telegram updates to auto-link users via `/start <userId>`
  */
@@ -82,8 +84,19 @@ export async function processTelegramUpdates(): Promise<{
   linkedUsers: string[];
 }> {
   try {
-    const res = await fetch(`${TELEGRAM_API_BASE}/getUpdates?limit=50&timeout=2`);
-    const data = await res.json();
+    const url = lastUpdateOffset > 0
+      ? `${TELEGRAM_API_BASE}/getUpdates?offset=${lastUpdateOffset}&limit=50&timeout=2`
+      : `${TELEGRAM_API_BASE}/getUpdates?limit=50&timeout=2`;
+
+    let res = await fetch(url);
+    let data = await res.json();
+
+    // If webhook conflict error (409), clear webhook first and retry
+    if (!data.ok && data.error_code === 409) {
+      await fetch(`${TELEGRAM_API_BASE}/deleteWebhook?drop_pending_updates=false`);
+      res = await fetch(url);
+      data = await res.json();
+    }
 
     if (!data.ok || !Array.isArray(data.result)) {
       return { processedCount: 0, linkedUsers: [] };
@@ -94,6 +107,10 @@ export async function processTelegramUpdates(): Promise<{
     let processedCount = 0;
 
     for (const update of data.result) {
+      if (update.update_id && update.update_id >= lastUpdateOffset) {
+        lastUpdateOffset = update.update_id + 1;
+      }
+
       const msg = update.message || update.edited_message;
       if (!msg || !msg.text) continue;
 
@@ -103,7 +120,7 @@ export async function processTelegramUpdates(): Promise<{
 
       // Check if message is a /start command with user ID
       // Formats supported: "/start <userId>", "/start=<userId>", or "start <userId>"
-      const match = text.match(/^\/start(?:=|\s+)?(.+)?$/i);
+      const match = text.match(/^\/?start(?:=|\s+)?(.+)?$/i);
       if (match) {
         processedCount++;
         const candidateId = match[1]?.trim();

@@ -697,7 +697,7 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
                   <div>
                     <div className="font-bold text-slate-900 text-xs sm:text-sm flex items-center gap-2">
                       <span>Notifiche & Promemoria Bot Telegram (@Guardian32170_bot)</span>
-                      <span className="px-2 py-0.5 bg-sky-200 text-sky-900 text-[10px] font-bold rounded">Canale Principale</span>
+                      <span className="px-2 py-0.5 bg-sky-200 text-sky-900 text-[10px] font-bold rounded">Canale Telegram</span>
                     </div>
                     <div className="text-[11px] text-slate-600 mt-0.5">
                       Invia promemoria istantanei via Telegram con link diretto e pulsante di conferma a 1 tocco per ciascun caregiver assegnato.
@@ -716,6 +716,34 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
                 </label>
               </div>
 
+              {/* Email Notification Channel Toggle */}
+              <div className="flex items-center justify-between p-4 bg-teal-50/70 rounded-xl border border-teal-200">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-teal-600 text-white rounded-xl shrink-0">
+                    <Mail className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-900 text-xs sm:text-sm flex items-center gap-2">
+                      <span>Notifiche & Promemoria via Email</span>
+                      <span className="px-2 py-0.5 bg-teal-200 text-teal-900 text-[10px] font-bold rounded">Canale Email</span>
+                    </div>
+                    <div className="text-[11px] text-slate-600 mt-0.5">
+                      Invia notifiche email automatiche e solleciti alle caselle di posta dei caregiver con pulsante di conferma diretta.
+                    </div>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    disabled={!isFamilyAdmin}
+                    checked={notificationSettings.emailEnabled !== false}
+                    onChange={(e) => setNotificationSettings({ ...notificationSettings, emailEnabled: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-600"></div>
+                </label>
+              </div>
+
               {/* Push Toggle */}
               <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200">
                 <div className="flex items-start gap-3">
@@ -725,7 +753,7 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
                   <div>
                     <div className="font-bold text-slate-900 text-xs sm:text-sm">Notifiche Push Browser & Mobile</div>
                     <div className="text-[11px] text-slate-500">
-                      Ricevi notifiche sul dispositivo quando è il momento della somministrazione di un farmaco.
+                      Ricevi notifiche push sul dispositivo quando è il momento della somministrazione di un farmaco.
                     </div>
                   </div>
                 </div>
@@ -744,29 +772,54 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
                 </label>
               </div>
 
-              {/* Sound Alarm Toggle */}
-              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200">
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-purple-100 text-purple-800 rounded-xl shrink-0">
-                    <Volume2 className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="font-bold text-slate-900 text-xs sm:text-sm">Allarme Sonoro Continuo</div>
-                    <div className="text-[11px] text-slate-500">
-                      Segnale acustico ripetuto quando una dose è in ritardo fino a conferma della somministrazione.
+              {/* Continuous Alarm & Renewal Settings */}
+              <div className="p-4 bg-amber-50/80 rounded-xl border border-amber-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-amber-600 text-white rounded-xl shrink-0">
+                      <Volume2 className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-900 text-xs sm:text-sm">
+                        Rinnovo Totale Notifiche & Allarme Continuo
+                      </div>
+                      <div className="text-[11px] text-slate-600 mt-0.5">
+                        Rinnova totalmente la notifica (Telegram, Email, Push e segnale sonoro) periodicamente finché il farmaco non viene somministrato o segnato come non somministrato.
+                      </div>
                     </div>
                   </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      disabled={!isFamilyAdmin}
+                      checked={notificationSettings.soundAlarmEnabled !== false}
+                      onChange={(e) => setNotificationSettings({ ...notificationSettings, soundAlarmEnabled: e.target.checked, autoRepeatNudges: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+                  </label>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    disabled={!isFamilyAdmin}
-                    checked={notificationSettings.soundAlarmEnabled}
-                    onChange={(e) => setNotificationSettings({ ...notificationSettings, soundAlarmEnabled: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
-                </label>
+
+                <div className="pt-2 border-t border-amber-200/70 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
+                  <span className="font-semibold text-amber-950">
+                    Periodicità di rinnovo notifica (in minuti, max 60 min):
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      disabled={!isFamilyAdmin}
+                      value={notificationSettings.repeatIntervalMinutes || 10}
+                      onChange={(e) => {
+                        const val = Math.max(1, Math.min(60, parseInt(e.target.value) || 10));
+                        setNotificationSettings({ ...notificationSettings, repeatIntervalMinutes: val });
+                      }}
+                      className="w-20 p-2 bg-white border border-amber-300 rounded-lg text-center font-bold text-xs outline-none focus:border-amber-600"
+                    />
+                    <span className="text-slate-600 font-medium">minuti</span>
+                  </div>
+                </div>
               </div>
 
             </div>

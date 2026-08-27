@@ -281,7 +281,7 @@ export const TodayDosesView: React.FC<TodayDosesViewProps> = ({
                 Attenzione: {lateCount} {lateCount === 1 ? 'dose risulta in ritardo' : 'dosi risultano in ritardo'}!
               </h4>
               <p className="text-xs text-rose-800 mt-0.5">
-                Le notifiche WhatsApp e Push continuano a sollecitare i caregiver finché la somministrazione non viene registrata.
+                Le notifiche Telegram, Email e Push continuano a sollecitare i caregiver finché la somministrazione non viene registrata o segnata come non somministrata.
               </p>
             </div>
           </div>
@@ -541,15 +541,15 @@ export const TodayDosesView: React.FC<TodayDosesViewProps> = ({
                   {/* Right Action Buttons */}
                   <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
                     
-                    {/* Send WhatsApp / Push Nudge */}
-                    {!isTaken && (
+                    {/* Send Telegram / Email / Push Nudge */}
+                    {!isTaken && !isSkipped && (
                       <button
                         onClick={() => onOpenNudgeModal(item)}
-                        className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs"
-                        title="Invia sollecito WhatsApp o Push al caregiver"
+                        className="px-3 py-2 bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs"
+                        title="Invia sollecito Telegram, Email o Push ai caregiver"
                       >
-                        <MessageSquare className="w-4 h-4 text-emerald-600" />
-                        <span className="hidden sm:inline">Sollecita WhatsApp</span>
+                        <Send className="w-3.5 h-3.5 text-sky-600" />
+                        <span className="hidden sm:inline">Invia Sollecito</span>
                       </button>
                     )}
 

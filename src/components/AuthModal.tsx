@@ -255,13 +255,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               
               {/* Informative Note: Se vuoi unirti a una famiglia esistente */}
               {!isInviteMode ? (
-                <div className="p-3 bg-sky-50/80 border border-sky-200 rounded-2xl flex items-start gap-2.5 text-xs text-sky-900">
-                  <Info className="w-4 h-4 text-sky-700 shrink-0 mt-0.5" />
-                  <p className="leading-relaxed text-[11px]">
-                    <strong>Creazione Nuovo Gruppo Famiglia:</strong> Compila i campi sottostanti per iniziare ad amministrare il tuo gruppo.
-                    <span className="block mt-1 text-slate-600">
-                      *Vuoi unirti a una famiglia già esistente? Chiedi all'amministratore di quella famiglia di inviarti un link d'invito via email o messaggio.*
-                    </span>
+                <div className="p-3.5 bg-amber-50/90 border border-amber-300/90 rounded-2xl flex items-start gap-2.5 text-xs text-amber-950 shadow-xs">
+                  <Info className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                  <p className="leading-relaxed text-[12px] font-medium">
+                    <strong className="text-amber-950 font-bold">Vuoi unirti a una famiglia già esistente?</strong> Chiedi all'amministratore di quella famiglia di inviarti un link d'invito via email, WhatsApp o Telegram.
                   </p>
                 </div>
               ) : (

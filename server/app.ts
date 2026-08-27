@@ -1385,11 +1385,11 @@ const handleResetDb = (req: Request, res: Response) => {
     }
 
     const { confirm1, confirm2, confirmationText, confirmationCode } = req.body;
-    const text = confirmationText || confirmationCode;
+    const text = (confirmationText || confirmationCode || '').trim().toUpperCase();
 
-    if (text !== 'RESET_CINICOCARE_2026') {
+    if (text !== 'CANCELLA' && text !== 'RESET_CINICOCARE_2026') {
       return res.status(400).json({
-        error: 'Conferma obbligatoria non valida. Digita esattamente "RESET_CINICOCARE_2026"'
+        error: 'Conferma obbligatoria non valida. Digita esattamente "CANCELLA"'
       });
     }
 

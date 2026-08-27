@@ -72,7 +72,7 @@ export const InfoModal: React.FC<InfoModalProps> = ({ isOpen, onClose, onOpenPri
               </p>
               <ul className="mt-2 space-y-1 text-xs text-slate-600 list-disc list-inside">
                 <li>Piano terapeutico giornaliero con spunta in tempo reale sincronizzata tra tutti i familiari.</li>
-                <li>Solleciti e promemoria con link rapido WhatsApp e notifiche Push sul cellulare.</li>
+                <li>Solleciti e promemoria con link rapido Telegram, Email e notifiche Push sul cellulare.</li>
                 <li>Isolamento rigoroso dei gruppi famiglia con gestione permessi differenziata per familiari e assistenti.</li>
                 <li>Nessun cookie di terze parti o tracciamento pubblicitario.</li>
               </ul>
