@@ -85,7 +85,7 @@ export const NudgeModal: React.FC<NudgeModalProps> = ({
       const channelLabel = channel === 'all'
         ? 'Tutti i canali (Telegram, Email, Push)'
         : channel === 'telegram'
-        ? 'Telegram Bot (@Guardian32170_bot)'
+        ? 'Telegram Bot'
         : channel === 'email'
         ? 'Email'
         : 'Notifiche Push';

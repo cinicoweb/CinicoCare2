@@ -1,18 +1,31 @@
 import express, { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { JsonDatabase, hashPassword, getTodayDateString } from './db';
-import { User, Family, Patient, Therapy, DoseLog, Invitation, BootstrapData, AdminOverviewData } from '../src/types';
+import { User, Family, Patient, Therapy, DoseLog, Invitation, BootstrapData, AdminOverviewData, TelegramBotConfig, SmtpConfig } from '../src/types';
 import {
-  TELEGRAM_BOT_TOKEN,
-  TELEGRAM_BOT_USERNAME,
+  getTelegramConfig,
   getTelegramDeepLink,
   sendTelegramMessage,
   processTelegramUpdates,
+  testTelegramBot,
+  deleteTelegramWebhook,
+  startTelegramPolling,
+  stopTelegramPolling,
+  getTelegramStatus,
   generateRegistrationEmailHtml
 } from './telegram';
+import {
+  getSmtpConfig,
+  sendEmail,
+  verifySmtpConnection
+} from './email';
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
+
+// Start background Telegram polling
+startTelegramPolling();
+
 
 // Enable CORS for API requests
 app.use((req, res, next) => {
@@ -845,7 +858,7 @@ app.post('/api/doses/toggle', authenticate, (req, res) => {
 });
 
 // --------------------------------------------------------------------------
-// NOTIFICATIONS & TELEGRAM NUDGE DISPATCH (Guardian @Guardian32170_bot)
+// NOTIFICATIONS & MULTICHANNEL NUDGE DISPATCH (Telegram, Email, Push)
 // --------------------------------------------------------------------------
 app.post('/api/doses/nudge', authenticate, async (req, res) => {
   try {
@@ -854,7 +867,8 @@ app.post('/api/doses/nudge', authenticate, async (req, res) => {
       therapyId,
       patientId,
       scheduledDate,
-      scheduledTime
+      scheduledTime,
+      channel // 'telegram' | 'email' | 'push' | 'all'
     } = req.body;
 
     const db = dbInstance.getData();
@@ -905,44 +919,107 @@ app.post('/api/doses/nudge', authenticate, async (req, res) => {
       (therapy.instructions ? `📝 <b>Istruzioni:</b> ${therapy.instructions}\n\n` : '\n') +
       `👉 <i>Tocca il pulsante qui sotto per confermare la somministrazione nell'App:</i>`;
 
+    const emailSubject = `🔔 Promemoria Farmaco: ${therapy.medicationName} per ${patient.name}`;
+    const emailBodyHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8fafc; padding: 20px; color: #1e293b; }
+    .card { max-width: 550px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; }
+    .header { background: #0369a1; padding: 24px; text-align: center; color: #ffffff; }
+    .content { padding: 24px; font-size: 14px; line-height: 1.6; }
+    .btn { display: inline-block; background-color: #0284c7; color: #ffffff !important; padding: 12px 24px; border-radius: 12px; font-weight: 700; text-decoration: none; margin: 16px 0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <h2 style="margin:0; font-size: 20px;">🔔 Promemoria Terapia Farmaci</h2>
+    </div>
+    <div class="content">
+      <p>Gentile Caregiver,</p>
+      <p>È il momento di somministrare il farmaco per <strong>${patient.name}</strong>:</p>
+      <ul style="padding-left: 20px;">
+        <li><strong>Farmaco:</strong> ${therapy.medicationName}${dosageStr}</li>
+        <li><strong>Orario previsto:</strong> ${scheduledTime}</li>
+        ${therapy.instructions ? `<li><strong>Istruzioni:</strong> ${therapy.instructions}</li>` : ''}
+      </ul>
+      <div style="text-align: center; margin: 20px 0;">
+        <a href="${confirmUrl}" class="btn" target="_blank">✅ Conferma Somministrazione (1 Tocco)</a>
+      </div>
+      <p style="font-size: 12px; color: #64748b;">Puoi confermare direttamente con 1 tocco oppure accedere all'app CinicoCare.</p>
+    </div>
+  </div>
+</body>
+</html>
+    `.trim();
+
     // Find all assigned caregivers for this patient in the family
     const caregiversForPatient = db.users.filter(u =>
       u.familyId === user.familyId &&
-      (u.assignedPatientIds.includes(patientId) || u.isFamilyAdmin)
+      (u.assignedPatientIds.includes(patientId) || u.isFamilyAdmin || u.role === 'superadmin')
     );
 
     const telegramResults: Array<{ caregiver: string; chatId?: string; success: boolean; error?: string }> = [];
+    const emailResults: Array<{ caregiver: string; email: string; success: boolean; error?: string }> = [];
 
-    // Dispatch directly via Telegram Bot to caregivers who have linked Telegram
-    for (const caregiver of caregiversForPatient) {
-      if (caregiver.telegramChatId) {
-        const sendResult = await sendTelegramMessage(
-          caregiver.telegramChatId,
-          messageHtml,
-          {
-            parseMode: 'HTML',
-            inlineKeyboard: [
-              [
-                {
-                  text: '✅ Ho somministrato il farmaco',
-                  url: confirmUrl
-                }
+    const sendViaTelegram = !channel || channel === 'telegram' || channel === 'all';
+    const sendViaEmail = !channel || channel === 'email' || channel === 'all';
+
+    // 1. Dispatch via Telegram Bot
+    if (sendViaTelegram) {
+      for (const caregiver of caregiversForPatient) {
+        if (caregiver.telegramChatId) {
+          const sendResult = await sendTelegramMessage(
+            caregiver.telegramChatId,
+            messageHtml,
+            {
+              parseMode: 'HTML',
+              inlineKeyboard: [
+                [
+                  {
+                    text: '✅ Ho somministrato il farmaco',
+                    url: confirmUrl
+                  }
+                ]
               ]
-            ]
-          }
-        );
-        telegramResults.push({
-          caregiver: caregiver.name,
-          chatId: caregiver.telegramChatId,
-          success: sendResult.success,
-          error: sendResult.error
-        });
-      } else {
-        telegramResults.push({
-          caregiver: caregiver.name,
-          success: false,
-          error: 'Telegram non collegato'
-        });
+            }
+          );
+          telegramResults.push({
+            caregiver: caregiver.name,
+            chatId: caregiver.telegramChatId,
+            success: sendResult.success,
+            error: sendResult.error
+          });
+        } else {
+          telegramResults.push({
+            caregiver: caregiver.name,
+            success: false,
+            error: 'Telegram non collegato'
+          });
+        }
+      }
+    }
+
+    // 2. Dispatch via Email (SMTP)
+    if (sendViaEmail) {
+      for (const caregiver of caregiversForPatient) {
+        if (caregiver.email) {
+          const mailRes = await sendEmail({
+            to: caregiver.email,
+            subject: emailSubject,
+            html: emailBodyHtml,
+            text: `Promemoria per ${caregiver.name}: somministrare ${therapy.medicationName} a ${patient.name} alle ${scheduledTime}. Conferma qui: ${confirmUrl}`
+          });
+          emailResults.push({
+            caregiver: caregiver.name,
+            email: caregiver.email,
+            success: mailRes.success,
+            error: mailRes.error
+          });
+        }
       }
     }
 
@@ -950,7 +1027,7 @@ app.post('/api/doses/nudge', authenticate, async (req, res) => {
 
     return res.json({
       success: true,
-      message: 'Promemoria Telegram inviato con successo',
+      message: 'Sollecito inviato con successo',
       messageText: messageHtml,
       telegramLink,
       confirmUrl,
@@ -962,7 +1039,8 @@ app.post('/api/doses/nudge', authenticate, async (req, res) => {
         telegramChatId: c.telegramChatId,
         telegramUsername: c.telegramUsername
       })),
-      telegramDeliveryResults: telegramResults
+      telegramDeliveryResults: telegramResults,
+      emailDeliveryResults: emailResults
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || 'Errore invio promemoria' });
@@ -970,7 +1048,7 @@ app.post('/api/doses/nudge', authenticate, async (req, res) => {
 });
 
 // --------------------------------------------------------------------------
-// TELEGRAM BOT WEBHOOK & SYNC ENDPOINTS (@Guardian32170_bot)
+// TELEGRAM BOT WEBHOOK & SYNC ENDPOINTS
 // --------------------------------------------------------------------------
 
 // Telegram Webhook endpoint
@@ -985,43 +1063,50 @@ app.post('/api/telegram/webhook', async (req, res) => {
       const chatId = String(msg.chat.id);
       const username = msg.from?.username || msg.from?.first_name || '';
 
-      const match = text.match(/^\/start(?:=|\s+)?(.+)?$/i);
-      if (match) {
-        const candidateId = match[1]?.trim();
-        const db = dbInstance.getData();
+      const match = text.match(/^\/?start(?:=|\s+)?(.+)?$/i);
+      const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
 
-        if (candidateId) {
-          const targetUser = db.users.find(
-            u => u.id === candidateId || u.id.toLowerCase() === candidateId.toLowerCase() || u.email.toLowerCase() === candidateId.toLowerCase()
-          );
+      let candidateId = match ? match[1]?.trim() : null;
+      const directEmail = emailMatch ? emailMatch[1].toLowerCase() : null;
 
-          if (targetUser) {
-            targetUser.telegramChatId = chatId;
-            targetUser.telegramUsername = username;
-            targetUser.telegramConnectedAt = new Date().toISOString();
-            dbInstance.persist();
+      const db = dbInstance.getData();
+      let targetUser: User | undefined;
 
-            await sendTelegramMessage(
-              chatId,
-              `👋 <b>Ciao ${targetUser.name}!</b>\n\n` +
-              `✅ Il tuo account <b>CinicoCare</b> è stato collegato con successo al bot Guardian (<code>@${TELEGRAM_BOT_USERNAME}</code>).\n\n` +
-              `D'ora in poi riceverai direttamente qui su Telegram i promemoria e gli avvisi di somministrazione dei farmaci per i tuoi assistiti.`,
-              { parseMode: 'HTML' }
-            );
-          } else {
-            await sendTelegramMessage(
-              chatId,
-              `👋 Ciao! Codice utente CinicoCare non riconosciuto. Apri l'app CinicoCare e clicca su "Collega il tuo account Telegram" dal tuo profilo per collegarti automaticamente.`,
-              { parseMode: 'HTML' }
-            );
-          }
-        } else {
-          await sendTelegramMessage(
-            chatId,
-            `👋 Ciao! Sono il bot Guardian di <b>CinicoCare</b>.\n\nPer collegare il tuo account, accedi all'app CinicoCare e premi il pulsante <b>"Collega il tuo account Telegram"</b>.`,
-            { parseMode: 'HTML' }
-          );
-        }
+      if (candidateId) {
+        candidateId = candidateId.replace(/^start=/, '').trim();
+        targetUser = db.users.find(
+          u => u.id === candidateId ||
+               u.id.toLowerCase() === candidateId!.toLowerCase() ||
+               u.email.toLowerCase() === candidateId!.toLowerCase()
+        );
+      }
+
+      if (!targetUser && directEmail) {
+        targetUser = db.users.find(u => u.email.toLowerCase() === directEmail);
+      }
+
+      const botConfig = getTelegramConfig();
+
+      if (targetUser) {
+        targetUser.telegramChatId = chatId;
+        targetUser.telegramUsername = username;
+        targetUser.telegramConnectedAt = new Date().toISOString();
+        dbInstance.persist();
+
+        await sendTelegramMessage(
+          chatId,
+          `👋 <b>Ciao ${targetUser.name}!</b>\n\n` +
+          `✅ Il tuo account <b>CinicoCare</b> (<code>${targetUser.email}</code>) è stato collegato con successo al bot Guardian (<code>@${botConfig.botUsername}</code>).\n\n` +
+          `D'ora in poi riceverai direttamente qui su Telegram i promemoria e gli avvisi di somministrazione dei farmaci per i tuoi assistiti.`,
+          { parseMode: 'HTML' }
+        );
+      } else {
+        await sendTelegramMessage(
+          chatId,
+          `👋 <b>Benvenuto nel Bot Guardian di CinicoCare!</b>\n\n` +
+          `Per collegare il tuo account, scrivi qui la tua <b>email registrata</b> oppure apri l'app CinicoCare e tocca <b>"Collega il tuo account Telegram"</b>.`,
+          { parseMode: 'HTML' }
+        );
       }
     }
 
@@ -1051,13 +1136,14 @@ app.get('/api/telegram/check-link', authenticate, async (req, res) => {
 
     const db = dbInstance.getData();
     const dbUser = db.users.find(u => u.id === user.id);
+    const botConfig = getTelegramConfig();
 
     return res.json({
       connected: Boolean(dbUser?.telegramChatId),
       chatId: dbUser?.telegramChatId || null,
       username: dbUser?.telegramUsername || null,
       connectedAt: dbUser?.telegramConnectedAt || null,
-      botUsername: TELEGRAM_BOT_USERNAME,
+      botUsername: botConfig.botUsername,
       deepLink: getTelegramDeepLink(user.id)
     });
   } catch (err: any) {
@@ -1113,16 +1199,18 @@ app.post('/api/telegram/send-test', authenticate, async (req, res) => {
       recipientName = currentUser.name;
     }
 
+    const botConfig = getTelegramConfig();
+
     if (!targetChatId) {
       return res.status(400).json({
-        error: 'L\'utente selezionato non ha ancora collegato il suo account Telegram. Clicca prima sul link per collegare il bot @' + TELEGRAM_BOT_USERNAME,
+        error: `L'utente selezionato non ha ancora collegato il suo account Telegram. Clicca prima sul link per collegare il bot @${botConfig.botUsername}`,
         deepLink: getTelegramDeepLink(userId || currentUser.id)
       });
     }
 
     const msg = text ||
       `🔔 <b>Test Notifica CinicoCare</b>\n\n` +
-      `Ciao <b>${recipientName}</b>, questo è un messaggio di test inviato dal bot Guardian (<code>@${TELEGRAM_BOT_USERNAME}</code>).\n\n` +
+      `Ciao <b>${recipientName}</b>, questo è un messaggio di test inviato dal bot Guardian (<code>@${botConfig.botUsername}</code>).\n\n` +
       `Il tuo account Telegram è configurato e pronto a ricevere i promemoria delle terapie!`;
 
     const result = await sendTelegramMessage(targetChatId, msg, { parseMode: 'HTML' });
@@ -1148,6 +1236,238 @@ app.post('/api/telegram/send-test', authenticate, async (req, res) => {
 });
 
 // --------------------------------------------------------------------------
+// ADMIN: DYNAMIC TELEGRAM & SMTP CONFIGURATION
+// --------------------------------------------------------------------------
+
+// Get current Telegram Bot Config
+app.get('/api/admin/telegram-config', authenticate, async (req, res) => {
+  try {
+    const user = (req as any).user as User;
+    if (user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Accesso riservato all\'Amministratore Generale' });
+    }
+    const currentConfig = getTelegramConfig();
+    const status = getTelegramStatus();
+    return res.json({
+      success: true,
+      config: {
+        botUsername: currentConfig.botUsername,
+        pollingEnabled: currentConfig.pollingEnabled,
+        pollingIntervalMs: currentConfig.pollingIntervalMs,
+        hasCustomToken: Boolean(currentConfig.botToken)
+      },
+      status
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Errore lettura configurazione Telegram' });
+  }
+});
+
+// Get current SMTP Config
+app.get('/api/admin/smtp-config', authenticate, async (req, res) => {
+  try {
+    const user = (req as any).user as User;
+    if (user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Accesso riservato all\'Amministratore Generale' });
+    }
+    const currentConfig = getSmtpConfig();
+    return res.json({
+      success: true,
+      config: {
+        host: currentConfig.host,
+        port: currentConfig.port,
+        secure: currentConfig.secure,
+        user: currentConfig.user,
+        fromEmail: currentConfig.fromEmail,
+        fromName: currentConfig.fromName,
+        isConfigured: currentConfig.isConfigured,
+        hasPassword: Boolean(currentConfig.pass)
+      }
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Errore lettura configurazione SMTP' });
+  }
+});
+
+// Update Telegram Bot Token & Username
+app.post('/api/admin/telegram-config', authenticate, async (req, res) => {
+  try {
+    const user = (req as any).user as User;
+    if (user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Accesso riservato all\'Amministratore Generale' });
+    }
+
+    const { botToken, botUsername, pollingEnabled } = req.body;
+    const currentConfig = getTelegramConfig();
+
+    const cleanUsername = botUsername ? botUsername.replace(/^@/, '').trim() : currentConfig.botUsername;
+    const cleanToken = botToken ? botToken.trim() : currentConfig.botToken;
+
+    if (!cleanToken || !cleanUsername) {
+      return res.status(400).json({ error: 'Token del Bot e Username sono entrambi obbligatori' });
+    }
+
+    // Verify token with Telegram API
+    const testRes = await testTelegramBot(cleanToken);
+    if (!testRes.success) {
+      return res.status(400).json({
+        error: `Test del Bot Telegram fallito: ${testRes.error}`
+      });
+    }
+
+    // Clear any webhook so polling works
+    await deleteTelegramWebhook(cleanToken);
+
+    if (pollingEnabled === false) {
+      stopTelegramPolling();
+    } else {
+      startTelegramPolling();
+    }
+
+    const db = dbInstance.getData();
+    db.telegramConfig = {
+      botToken: cleanToken,
+      botUsername: cleanUsername,
+      isActive: true,
+      pollingEnabled: pollingEnabled !== false,
+      lastTestedAt: new Date().toISOString(),
+      botInfo: testRes.bot
+    };
+
+    dbInstance.persist();
+
+    return res.json({
+      success: true,
+      message: `Bot Telegram @${cleanUsername} configurato e verificato con successo!`,
+      telegramConfig: db.telegramConfig,
+      status: getTelegramStatus()
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Errore configurazione bot Telegram' });
+  }
+});
+
+// Test arbitrary Telegram bot token
+app.post('/api/admin/telegram-test-bot', authenticate, async (req, res) => {
+  try {
+    const user = (req as any).user as User;
+    if (user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Accesso riservato all\'Amministratore Generale' });
+    }
+
+    const { botToken } = req.body;
+    const testResult = await testTelegramBot(botToken);
+    return res.json(testResult);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Errore test bot' });
+  }
+});
+
+// Delete webhook
+app.post('/api/admin/telegram-clear-webhook', authenticate, async (req, res) => {
+  try {
+    const user = (req as any).user as User;
+    if (user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Accesso riservato all\'Amministratore Generale' });
+    }
+
+    const result = await deleteTelegramWebhook();
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Errore rimozione webhook' });
+  }
+});
+
+// Save SMTP Config
+app.post('/api/admin/smtp-config', authenticate, async (req, res) => {
+  try {
+    const user = (req as any).user as User;
+    if (user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Accesso riservato all\'Amministratore Generale' });
+    }
+
+    const { host, port, secure, user: smtpUser, pass, fromEmail, fromName } = req.body;
+
+    const newConfig: SmtpConfig = {
+      host: (host || '').trim(),
+      port: Number(port) || 587,
+      secure: Boolean(secure),
+      user: (smtpUser || '').trim(),
+      pass: (pass || '').trim(),
+      fromEmail: (fromEmail || 'notifiche@cinicocare.it').trim(),
+      fromName: (fromName || 'CinicoCare Assistenza').trim(),
+      isConfigured: Boolean(host && smtpUser)
+    };
+
+    const db = dbInstance.getData();
+    db.smtpConfig = newConfig;
+    dbInstance.persist();
+
+    return res.json({
+      success: true,
+      message: 'Configurazione SMTP salvata con successo!',
+      smtpConfig: newConfig
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Errore salvataggio configurazione SMTP' });
+  }
+});
+
+// Test SMTP Connection and Send Test Email
+app.post('/api/admin/smtp-test', authenticate, async (req, res) => {
+  try {
+    const user = (req as any).user as User;
+    if (user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Accesso riservato all\'Amministratore Generale' });
+    }
+
+    const { testEmailAddress } = req.body;
+    const recipient = testEmailAddress || user.email;
+
+    const verifyResult = await verifySmtpConnection();
+    if (!verifyResult.success) {
+      return res.status(400).json({
+        success: false,
+        error: verifyResult.message
+      });
+    }
+
+    const sendRes = await sendEmail({
+      to: recipient,
+      subject: 'CinicoCare - Email di Test Configurazione SMTP',
+      html: `
+        <div style="font-family:sans-serif; padding:20px; background:#f8fafc; border-radius:12px;">
+          <h2 style="color:#0369a1;">✅ Configurazione SMTP Funzionante!</h2>
+          <p>Questa è un'email di test inviata con successo dalla piattaforma <strong>CinicoCare</strong> al tuo indirizzo <code>${recipient}</code>.</p>
+          <p>Data e ora: ${new Date().toLocaleString('it-IT')}</p>
+        </div>
+      `,
+      text: `Configurazione SMTP CinicoCare verificata con successo per ${recipient}.`
+    });
+
+    if (sendRes.success && !sendRes.isSimulated) {
+      return res.json({
+        success: true,
+        message: `Email di test inviata con successo a ${recipient}!`,
+        messageId: sendRes.messageId
+      });
+    } else if (sendRes.isSimulated) {
+      return res.status(400).json({
+        success: false,
+        error: sendRes.error || 'Server SMTP non configurato'
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: sendRes.error || 'Errore durante l\'invio dell\'email di test'
+      });
+    }
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Errore test SMTP' });
+  }
+});
+
+// --------------------------------------------------------------------------
 // ADMIN SIMULATION: EMAIL & TELEGRAM NOTIFICATIONS
 // --------------------------------------------------------------------------
 app.post('/api/admin/simulate-notification', authenticate, async (req, res) => {
@@ -1162,7 +1482,8 @@ app.post('/api/admin/simulate-notification', authenticate, async (req, res) => {
       type, // 'registration_email' | 'therapy_reminder' | 'custom_telegram'
       patientId,
       therapyId,
-      customMessage
+      customMessage,
+      sendLive // boolean: send real email and/or Telegram
     } = req.body;
 
     const db = dbInstance.getData();
@@ -1171,11 +1492,12 @@ app.post('/api/admin/simulate-notification', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Utente destinatario non trovato' });
     }
 
+    const botConfig = getTelegramConfig();
     const origin = req.headers.origin || 'https://cinicocare.vercel.app';
     const deepLink = getTelegramDeepLink(targetUser.id);
     const targetFamily = db.families.find(f => f.id === targetUser.familyId);
 
-    // 1. SIMULATE REGISTRATION EMAIL
+    // 1. REGISTRATION EMAIL
     if (type === 'registration_email') {
       const emailData = generateRegistrationEmailHtml({
         name: targetUser.name,
@@ -1187,6 +1509,16 @@ app.post('/api/admin/simulate-notification', authenticate, async (req, res) => {
         appUrl: origin
       });
 
+      let liveEmailResult: any = null;
+      if (sendLive) {
+        liveEmailResult = await sendEmail({
+          to: targetUser.email,
+          subject: emailData.subject,
+          html: emailData.html,
+          text: emailData.text
+        });
+      }
+
       return res.json({
         success: true,
         type: 'registration_email',
@@ -1195,15 +1527,17 @@ app.post('/api/admin/simulate-notification', authenticate, async (req, res) => {
           name: targetUser.name,
           email: targetUser.email,
           role: targetUser.role,
-          telegramChatId: targetUser.telegramChatId || null
+          telegramChatId: targetUser.telegramChatId || null,
+          telegramConnected: Boolean(targetUser.telegramChatId)
         },
         email: emailData,
         telegramDeepLink: deepLink,
-        message: `Email di registrazione simulata per ${targetUser.name} (${targetUser.email})`
+        liveEmailResult,
+        message: `Email di registrazione per ${targetUser.name} (${targetUser.email}) elaborata con successo.`
       });
     }
 
-    // 2. SIMULATE / SEND THERAPY REMINDER
+    // 2. THERAPY REMINDER
     const patient = patientId ? db.patients.find(p => p.id === patientId) : (db.patients[0] || null);
     const therapy = therapyId ? db.therapies.find(t => t.id === therapyId) : (db.therapies[0] || null);
 
@@ -1211,7 +1545,7 @@ app.post('/api/admin/simulate-notification', authenticate, async (req, res) => {
     const confirmUrl = `${origin}?confirmDose=${therapy?.id || 'th1'}_${getTodayDateString()}_${scheduledTime}`;
 
     const reminderHtml =
-      `🔔 <b>CinicoCare Promemoria Terapia (Simulazione)</b>\n\n` +
+      `🔔 <b>CinicoCare Promemoria Terapia</b>\n\n` +
       `Ciao <b>${targetUser.name}</b>, è ora del farmaco per <b>${patient ? patient.name : 'Assistito'}</b>!\n\n` +
       `💊 <b>Farmaco:</b> ${therapy ? therapy.medicationName : 'Cardioaspirina'} ${therapy?.dosage ? `(${therapy.dosage})` : ''}\n` +
       `⏰ <b>Orario:</b> ${scheduledTime}\n` +
@@ -1224,9 +1558,9 @@ app.post('/api/admin/simulate-notification', authenticate, async (req, res) => {
 <head>
   <meta charset="utf-8">
   <style>
-    body { font-family: sans-serif; background: #f8fafc; padding: 20px; color: #1e293b; }
-    .box { max-width: 550px; margin: auto; background: white; border-radius: 12px; padding: 24px; border: 1px solid #e2e8f0; }
-    .btn { display: inline-block; background: #0284c7; color: white !important; padding: 12px 20px; border-radius: 10px; text-decoration: none; font-weight: bold; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; padding: 20px; color: #1e293b; }
+    .box { max-width: 550px; margin: auto; background: white; border-radius: 16px; padding: 24px; border: 1px solid #e2e8f0; }
+    .btn { display: inline-block; background: #0284c7; color: white !important; padding: 12px 24px; border-radius: 12px; text-decoration: none; font-weight: bold; }
   </style>
 </head>
 <body>
@@ -1235,17 +1569,18 @@ app.post('/api/admin/simulate-notification', authenticate, async (req, res) => {
     <p>Ciao <strong>${targetUser.name}</strong>, è ora della somministrazione farmaco per <strong>${patient ? patient.name : 'Assistito'}</strong>.</p>
     <p>💊 <strong>Farmaco:</strong> ${therapy ? therapy.medicationName : 'Cardioaspirina'} ${therapy?.dosage ? `(${therapy.dosage})` : ''}</p>
     <p>⏰ <strong>Orario previsto:</strong> ${scheduledTime}</p>
-    <div style="margin: 20px 0;">
+    <div style="margin: 20px 0; text-align: center;">
       <a href="${confirmUrl}" class="btn" target="_blank">✅ Conferma Somministrazione (1 Tocco)</a>
     </div>
     <hr style="border:none; border-top:1px solid #f1f5f9; margin: 20px 0;">
-    <p style="font-size:12px; color:#64748b;">Bot Telegram: <a href="${deepLink}">@${TELEGRAM_BOT_USERNAME}</a></p>
+    <p style="font-size:12px; color:#64748b;">Bot Telegram: <a href="${deepLink}">@${botConfig.botUsername}</a></p>
   </div>
 </body>
 </html>
     `.trim();
 
     let telegramSentResult: any = null;
+    let liveEmailResult: any = null;
 
     if (targetUser.telegramChatId) {
       telegramSentResult = await sendTelegramMessage(
@@ -1263,6 +1598,15 @@ app.post('/api/admin/simulate-notification', authenticate, async (req, res) => {
           ]
         }
       );
+    }
+
+    if (sendLive && targetUser.email) {
+      liveEmailResult = await sendEmail({
+        to: targetUser.email,
+        subject: `Promemoria Farmaco: ${therapy ? therapy.medicationName : 'Terapia'} per ${patient ? patient.name : 'Assistito'}`,
+        html: reminderEmailHtml,
+        text: `Promemoria per ${targetUser.name}: somministrare ${therapy ? therapy.medicationName : 'Farmaco'} a ${patient ? patient.name : 'Assistito'} alle ${scheduledTime}. Conferma qui: ${confirmUrl}`
+      });
     }
 
     return res.json({
@@ -1284,9 +1628,10 @@ app.post('/api/admin/simulate-notification', authenticate, async (req, res) => {
       telegramMessage: customMessage || reminderHtml,
       telegramDelivery: telegramSentResult || {
         success: false,
-        note: 'Telegram non inviato: account non collegato (Chat ID assente)',
+        note: 'Telegram non inviato: account non ancora collegato',
         deepLink
       },
+      liveEmailResult,
       confirmUrl,
       telegramDeepLink: deepLink
     });
@@ -1368,7 +1713,9 @@ app.get('/api/admin/overview', authenticate, (req, res) => {
       totalDoseLogs: db.doseLogs.length,
       families: familiesWithCounts,
       allUsers,
-      recentLogs: db.doseLogs.slice(-20).reverse()
+      recentLogs: db.doseLogs.slice(-20).reverse(),
+      telegramConfig: getTelegramConfig(),
+      smtpConfig: getSmtpConfig()
     };
 
     return res.json(overview);
@@ -1384,7 +1731,7 @@ const handleResetDb = (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Azione consentita solo all\'Amministratore Generale' });
     }
 
-    const { confirm1, confirm2, confirmationText, confirmationCode } = req.body;
+    const { confirmationText, confirmationCode } = req.body;
     const text = (confirmationText || confirmationCode || '').trim().toUpperCase();
 
     if (text !== 'CANCELLA' && text !== 'RESET_CINICOCARE_2026') {

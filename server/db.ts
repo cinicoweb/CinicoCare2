@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { User, Family, Patient, Therapy, DoseLog, Invitation } from '../src/types';
+import { User, Family, Patient, Therapy, DoseLog, Invitation, TelegramBotConfig, SmtpConfig } from '../src/types';
 
 export interface DatabaseSchema {
   users: (User & { passwordHash: string })[];
@@ -10,6 +10,8 @@ export interface DatabaseSchema {
   therapies: Therapy[];
   doseLogs: DoseLog[];
   invitations: Invitation[];
+  telegramConfig?: TelegramBotConfig;
+  smtpConfig?: SmtpConfig;
   pushSubscriptions: Array<{
     userId: string;
     endpoint: string;
@@ -62,7 +64,22 @@ export function getInitialSeedData(): DatabaseSchema {
     therapies: [],
     doseLogs: [],
     invitations: [],
-    pushSubscriptions: []
+    pushSubscriptions: [],
+    telegramConfig: {
+      botToken: process.env.TELEGRAM_BOT_TOKEN || '8765733787:AAHubCXTDstfLVvktRU62SFKJM1LksTra2E',
+      botUsername: process.env.TELEGRAM_BOT_USERNAME || 'Guardian32170_bot',
+      isActive: true
+    },
+    smtpConfig: {
+      host: process.env.SMTP_HOST || '',
+      port: Number(process.env.SMTP_PORT) || 587,
+      secure: process.env.SMTP_SECURE === 'true',
+      user: process.env.SMTP_USER || '',
+      pass: process.env.SMTP_PASS || '',
+      fromEmail: process.env.SMTP_FROM || 'notifiche@cinicocare.it',
+      fromName: process.env.SMTP_FROM_NAME || 'CinicoCare Assistenza',
+      isConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER)
+    }
   };
 }
 

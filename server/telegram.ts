@@ -1,13 +1,28 @@
 import { JsonDatabase } from './db';
-import { User } from '../src/types';
+import { TelegramBotConfig, User } from '../src/types';
 
-export const TELEGRAM_BOT_TOKEN = '8765733787:AAHubCXTDstfLVvktRU62SFKJM1LksTra2E';
-export const TELEGRAM_BOT_USERNAME = 'Guardian32170_bot';
-const TELEGRAM_API_BASE = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
+export function getTelegramConfig(): TelegramBotConfig {
+  const db = JsonDatabase.getInstance().getData();
+  if (db.telegramConfig && db.telegramConfig.botToken) {
+    return db.telegramConfig;
+  }
+
+  return {
+    botToken: process.env.TELEGRAM_BOT_TOKEN || '8765733787:AAHubCXTDstfLVvktRU62SFKJM1LksTra2E',
+    botUsername: process.env.TELEGRAM_BOT_USERNAME || 'Guardian32170_bot',
+    isActive: true
+  };
+}
+
+export function getTelegramApiBase(token?: string): string {
+  const t = token || getTelegramConfig().botToken;
+  return `https://api.telegram.org/bot${t}`;
+}
 
 export function getTelegramDeepLink(userId: string): string {
-  if (!userId) return `https://t.me/${TELEGRAM_BOT_USERNAME}`;
-  return `https://t.me/${TELEGRAM_BOT_USERNAME}?start=${userId.trim()}`;
+  const username = getTelegramConfig().botUsername || 'Guardian32170_bot';
+  if (!userId) return `https://t.me/${username}`;
+  return `https://t.me/${username}?start=${userId.trim()}`;
 }
 
 export interface SendTelegramResult {
@@ -18,7 +33,59 @@ export interface SendTelegramResult {
 }
 
 /**
- * Send a message via the Guardian Telegram Bot.
+ * Test Telegram bot connection and get bot metadata via /getMe
+ */
+export async function testTelegramBot(token?: string): Promise<{
+  success: boolean;
+  bot?: any;
+  error?: string;
+}> {
+  const botToken = token || getTelegramConfig().botToken;
+  if (!botToken) {
+    return { success: false, error: 'Token Bot Telegram non configurato' };
+  }
+
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
+    const data = await res.json();
+    if (data.ok && data.result) {
+      return {
+        success: true,
+        bot: data.result
+      };
+    } else {
+      return {
+        success: false,
+        error: data.description || 'Token bot non valido o non autorizzato da Telegram'
+      };
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      error: `Errore connessione a Telegram API: ${err.message || err}`
+    };
+  }
+}
+
+/**
+ * Delete any active webhook on Telegram so getUpdates polling works cleanly
+ */
+export async function deleteTelegramWebhook(token?: string): Promise<{ success: boolean; message: string }> {
+  const botToken = token || getTelegramConfig().botToken;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/deleteWebhook?drop_pending_updates=false`);
+    const data = await res.json();
+    if (data.ok) {
+      return { success: true, message: 'Webhook Telegram rimosso con successo (polling attivo)' };
+    }
+    return { success: false, message: data.description || 'Errore rimozione webhook' };
+  } catch (err: any) {
+    return { success: false, message: err.message || 'Errore di rete' };
+  }
+}
+
+/**
+ * Send a message via Telegram Bot.
  */
 export async function sendTelegramMessage(
   chatId: string | number,
@@ -30,6 +97,11 @@ export async function sendTelegramMessage(
 ): Promise<SendTelegramResult> {
   if (!chatId) {
     return { success: false, error: 'Chat ID Telegram non specificato' };
+  }
+
+  const config = getTelegramConfig();
+  if (!config.botToken) {
+    return { success: false, error: 'Bot Telegram non configurato nel sistema' };
   }
 
   const payload: any = {
@@ -45,7 +117,7 @@ export async function sendTelegramMessage(
   }
 
   try {
-    const res = await fetch(`${TELEGRAM_API_BASE}/sendMessage`, {
+    const res = await fetch(`${getTelegramApiBase()}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -77,29 +149,41 @@ export async function sendTelegramMessage(
 let lastUpdateOffset = 0;
 
 /**
- * Polling and processing Telegram updates to auto-link users via `/start <userId>`
+ * Polling and processing Telegram updates to auto-link users via `/start <userId>` or email
  */
 export async function processTelegramUpdates(): Promise<{
   processedCount: number;
   linkedUsers: string[];
+  lastOffset: number;
 }> {
+  const config = getTelegramConfig();
+  if (!config.botToken) {
+    return { processedCount: 0, linkedUsers: [], lastOffset: 0 };
+  }
+
   try {
+    const apiBase = getTelegramApiBase(config.botToken);
     const url = lastUpdateOffset > 0
-      ? `${TELEGRAM_API_BASE}/getUpdates?offset=${lastUpdateOffset}&limit=50&timeout=2`
-      : `${TELEGRAM_API_BASE}/getUpdates?limit=50&timeout=2`;
+      ? `${apiBase}/getUpdates?offset=${lastUpdateOffset}&limit=50&timeout=1`
+      : `${apiBase}/getUpdates?limit=50&timeout=1`;
 
     let res = await fetch(url);
-    let data = await res.json();
+    let data: any;
+    try {
+      data = await res.json();
+    } catch {
+      return { processedCount: 0, linkedUsers: [], lastOffset: lastUpdateOffset };
+    }
 
     // If webhook conflict error (409), clear webhook first and retry
     if (!data.ok && data.error_code === 409) {
-      await fetch(`${TELEGRAM_API_BASE}/deleteWebhook?drop_pending_updates=false`);
+      await fetch(`${apiBase}/deleteWebhook?drop_pending_updates=false`);
       res = await fetch(url);
       data = await res.json();
     }
 
     if (!data.ok || !Array.isArray(data.result)) {
-      return { processedCount: 0, linkedUsers: [] };
+      return { processedCount: 0, linkedUsers: [], lastOffset: lastUpdateOffset };
     }
 
     const db = JsonDatabase.getInstance().getData();
@@ -112,44 +196,68 @@ export async function processTelegramUpdates(): Promise<{
       }
 
       const msg = update.message || update.edited_message;
-      if (!msg || !msg.text) continue;
+      if (!msg) continue;
 
-      const text = msg.text.trim();
+      const text = (msg.text || '').trim();
       const chatId = String(msg.chat.id);
       const username = msg.from?.username || msg.from?.first_name || '';
 
-      // Check if message is a /start command with user ID
-      // Formats supported: "/start <userId>", "/start=<userId>", or "start <userId>"
+      if (!text) continue;
+
+      processedCount++;
+
+      // Check for /start or start command
       const match = text.match(/^\/?start(?:=|\s+)?(.+)?$/i);
-      if (match) {
-        processedCount++;
-        const candidateId = match[1]?.trim();
+      let candidateId = match ? match[1]?.trim() : null;
 
-        if (candidateId) {
-          // Look up user by ID (or email if supplied)
-          const targetUser = db.users.find(
-            u => u.id === candidateId || u.id.toLowerCase() === candidateId.toLowerCase() || u.email.toLowerCase() === candidateId.toLowerCase()
+      // If user typed an email address directly
+      const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+      const directEmail = emailMatch ? emailMatch[1].toLowerCase() : null;
+
+      let targetUser: User | undefined;
+
+      if (candidateId) {
+        // Strip out leading query chars if any
+        candidateId = candidateId.replace(/^start=/, '').trim();
+        targetUser = db.users.find(
+          u => u.id === candidateId ||
+               u.id.toLowerCase() === candidateId!.toLowerCase() ||
+               u.email.toLowerCase() === candidateId!.toLowerCase()
+        );
+      }
+
+      if (!targetUser && directEmail) {
+        targetUser = db.users.find(u => u.email.toLowerCase() === directEmail);
+      }
+
+      if (targetUser) {
+        const alreadyLinked = targetUser.telegramChatId === chatId;
+        targetUser.telegramChatId = chatId;
+        targetUser.telegramUsername = username;
+        targetUser.telegramConnectedAt = new Date().toISOString();
+
+        linkedUsers.push(`${targetUser.name} (${targetUser.email})`);
+
+        if (!alreadyLinked) {
+          // Send confirmation response to user on Telegram
+          await sendTelegramMessage(
+            chatId,
+            `👋 <b>Ciao ${targetUser.name}!</b>\n\n` +
+            `✅ Il tuo account <b>CinicoCare</b> (<code>${targetUser.email}</code>) è stato collegato con successo al bot Guardian (<code>@${config.botUsername}</code>).\n\n` +
+            `D'ora in poi riceverai direttamente qui su Telegram i promemoria e gli avvisi di somministrazione dei farmaci per i tuoi assistiti, con pulsanti di conferma rapida a 1 tocco.`,
+            { parseMode: 'HTML' }
           );
-
-          if (targetUser) {
-            const alreadyLinked = targetUser.telegramChatId === chatId;
-            targetUser.telegramChatId = chatId;
-            targetUser.telegramUsername = username;
-            targetUser.telegramConnectedAt = new Date().toISOString();
-
-            if (!alreadyLinked) {
-              linkedUsers.push(`${targetUser.name} (${targetUser.email})`);
-              // Send confirmation response to user on Telegram
-              await sendTelegramMessage(
-                chatId,
-                `👋 <b>Ciao ${targetUser.name}!</b>\n\n` +
-                `✅ Il tuo account <b>CinicoCare</b> è stato collegato con successo al bot Guardian (<code>@${TELEGRAM_BOT_USERNAME}</code>).\n\n` +
-                `D'ora in poi riceverai direttamente qui su Telegram i promemoria e gli avvisi di somministrazione dei farmaci per i tuoi assistiti.`,
-                { parseMode: 'HTML' }
-              );
-            }
-          }
         }
+      } else if (match && !candidateId) {
+        // User sent just /start without ID
+        await sendTelegramMessage(
+          chatId,
+          `👋 <b>Benvenuto nel Bot Guardian di CinicoCare!</b>\n\n` +
+          `Per collegare il tuo account e ricevere i promemoria dei farmaci sul tuo telefono:\n` +
+          `1️⃣ Rispondi a questo messaggio scrivendo la tua <b>email di registrazione</b> a CinicoCare.\n` +
+          `2️⃣ Oppure apri l'app CinicoCare, vai nel tuo Profilo e tocca <b>"Collega il tuo account Telegram"</b>.`,
+          { parseMode: 'HTML' }
+        );
       }
     }
 
@@ -157,11 +265,45 @@ export async function processTelegramUpdates(): Promise<{
       JsonDatabase.getInstance().persist();
     }
 
-    return { processedCount, linkedUsers };
+    return { processedCount, linkedUsers, lastOffset: lastUpdateOffset };
   } catch (err) {
     console.error('Error fetching Telegram updates:', err);
-    return { processedCount: 0, linkedUsers: [] };
+    return { processedCount: 0, linkedUsers: [], lastOffset: lastUpdateOffset };
   }
+}
+
+/**
+ * Background auto-polling scheduler for Telegram
+ */
+let pollingInterval: NodeJS.Timeout | null = null;
+
+export function startTelegramPolling() {
+  if (pollingInterval) return;
+  // Poll Telegram every 8 seconds
+  pollingInterval = setInterval(async () => {
+    try {
+      await processTelegramUpdates();
+    } catch (e) {
+      // Quiet background catch
+    }
+  }, 8000);
+}
+
+export function stopTelegramPolling() {
+  if (pollingInterval) {
+    clearInterval(pollingInterval);
+    pollingInterval = null;
+  }
+}
+
+export function getTelegramStatus() {
+  const config = getTelegramConfig();
+  return {
+    pollingRunning: Boolean(pollingInterval),
+    botUsername: config.botUsername,
+    hasToken: Boolean(config.botToken),
+    botInfo: config.botInfo || null
+  };
 }
 
 /**
@@ -177,6 +319,7 @@ export function generateRegistrationEmailHtml(params: {
   appUrl?: string;
 }): { subject: string; html: string; text: string } {
   const { name, email, password, familyName, userId, role, appUrl } = params;
+  const config = getTelegramConfig();
   const appOrigin = appUrl || 'https://cinicocare.vercel.app';
   const telegramLink = getTelegramDeepLink(userId);
   const roleDisplay = role === 'caregiver' ? 'Caregiver Incaricato' : 'Familiare (Amministratore)';
@@ -226,7 +369,7 @@ export function generateRegistrationEmailHtml(params: {
       <div class="telegram-box">
         <h3 style="margin-top: 0; color: #0369a1; font-size: 15px;">🤖 Collega il tuo account Telegram</h3>
         <p style="margin: 8px 0; font-size: 13px; color: #334155;">
-          Per ricevere i promemoria delle terapie e gli avvisi urgenti dei tuoi assistiti, collega il bot Telegram <strong>@${TELEGRAM_BOT_USERNAME}</strong> con un solo tocco:
+          Per ricevere i promemoria delle terapie e gli avvisi urgenti dei tuoi assistiti, collega il bot Telegram <strong>@${config.botUsername}</strong> con un solo tocco:
         </p>
         <a href="${telegramLink}" class="btn-telegram" target="_blank">📲 Collega il tuo account Telegram</a>
         <p style="margin-top: 10px; font-size: 11px; color: #64748b;">
@@ -259,7 +402,7 @@ Link applicazione: ${appOrigin}
 --- COLLEGAMENTO TELEGRAM BOT ---
 Per ricevere le notifiche e i promemoria delle terapie sul tuo telefono:
 1. Apri questo link diretto: ${telegramLink}
-2. Premi "AVVIA" (/start) nella chat con il bot @${TELEGRAM_BOT_USERNAME}
+2. Premi "AVVIA" (/start) nella chat con il bot @${config.botUsername}
 Il tuo profilo verrà collegato istantaneamente.
   `.trim();
 

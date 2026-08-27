@@ -139,4 +139,28 @@ export interface AdminOverviewData {
   })[];
   allUsers: (Omit<User, 'passwordHash'> & { familyName?: string })[];
   recentLogs: DoseLog[];
+  telegramConfig?: TelegramBotConfig;
+  smtpConfig?: SmtpConfig;
 }
+
+export interface TelegramBotConfig {
+  botToken: string;
+  botUsername: string;
+  isActive: boolean;
+  pollingEnabled?: boolean;
+  pollingIntervalMs?: number;
+  lastTestedAt?: string;
+  botInfo?: any;
+}
+
+export interface SmtpConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  fromEmail: string;
+  fromName: string;
+  isConfigured: boolean;
+}
+

@@ -15,7 +15,9 @@ import {
   MessageSquare,
   Volume2,
   FileEdit,
-  RotateCcw
+  RotateCcw,
+  XCircle,
+  AlertCircle
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Patient, Therapy, DoseLog, ScheduledDoseItem, User, Family } from '../types';
@@ -38,7 +40,7 @@ interface TodayDosesViewProps {
     status: 'taken' | 'skipped' | 'pending';
     notes?: string;
   }) => Promise<void>;
-  onOpenDoseModal: (item: ScheduledDoseItem) => void;
+  onOpenDoseModal: (item: ScheduledDoseItem, initialStatus?: 'taken' | 'skipped' | 'pending') => void;
   onOpenNudgeModal: (item: ScheduledDoseItem) => void;
   onNavigateToTherapies: () => void;
 }
@@ -93,7 +95,6 @@ export const TodayDosesView: React.FC<TodayDosesViewProps> = ({
         currentUser.assignedPatientIds.length > 0 &&
         !currentUser.assignedPatientIds.includes(patient.id)
       ) {
-        // Caregiver is only assigned to other patients
         return;
       }
 
@@ -156,14 +157,14 @@ export const TodayDosesView: React.FC<TodayDosesViewProps> = ({
   // Statistics
   const totalCount = scheduledItems.length;
   const takenCount = scheduledItems.filter(i => i.status === 'taken').length;
+  const skippedCount = scheduledItems.filter(i => i.status === 'skipped').length;
+  const pendingCount = scheduledItems.filter(i => i.status !== 'taken' && i.status !== 'skipped').length;
   const lateCount = scheduledItems.filter(i => i.isOverdue && i.status !== 'taken' && i.status !== 'skipped').length;
-  const pendingCount = scheduledItems.filter(i => (i.status === 'pending' || i.status === 'late') && !i.isOverdue).length;
   const percentCompleted = totalCount > 0 ? Math.round((takenCount / totalCount) * 100) : 0;
 
   // Trigger sound effect and celebration confetti when user clicks spunta
   const handleQuickCheck = async (item: ScheduledDoseItem) => {
     if (item.status === 'taken') {
-      // Toggle back to pending
       await onToggleDose({
         therapyId: item.therapy.id,
         patientId: item.patient.id,
@@ -250,106 +251,50 @@ export const TodayDosesView: React.FC<TodayDosesViewProps> = ({
           {!isViewingToday && (
             <button
               onClick={() => setCurrentDate(todayStr)}
-              className="text-xs text-sky-700 hover:text-sky-900 font-semibold px-2 py-1 underline"
+              className="text-xs text-sky-700 hover:underline font-bold px-2 py-1"
             >
               Torna a Oggi
             </button>
           )}
         </div>
 
-        {/* Real-time Nudge Loop Status Banner */}
-        {currentFamily?.notificationSettings?.autoRepeatNudges && (
-          <div className="flex items-center gap-2 text-xs text-slate-600 bg-sky-50/60 px-3.5 py-2 rounded-xl border border-sky-100">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>
-              Solleciti continui <strong>attivi</strong> (ogni {currentFamily.notificationSettings.repeatIntervalMinutes} min finché non spuntato)
-            </span>
+        {/* 3 Status Counters Summary */}
+        <div className="flex items-center gap-2 sm:gap-3 w-full md:w-auto justify-between md:justify-end flex-wrap">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-50 border border-sky-200 rounded-xl text-sky-900 text-xs font-semibold">
+            <Clock className="w-3.5 h-3.5 text-sky-700" />
+            <span>In attesa: <strong>{pendingCount}</strong></span>
           </div>
-        )}
 
-      </div>
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs font-semibold">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Somministrati: <strong>{takenCount}</strong></span>
+          </div>
 
-      {/* Overdue Warning Alert Bar (if any doses are late) */}
-      {lateCount > 0 && (
-        <div className="bg-rose-50 border-2 border-rose-300 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs animate-fade-in">
-          <div className="flex items-start gap-3">
-            <div className="p-2.5 bg-rose-600 text-white rounded-xl shrink-0 animate-bounce">
-              <AlertTriangle className="w-5 h-5" />
+          {skippedCount > 0 && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 text-xs font-semibold">
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+              <span>Non somministrati: <strong>{skippedCount}</strong></span>
             </div>
-            <div>
-              <h4 className="font-bold text-rose-950 text-sm sm:text-base">
-                Attenzione: {lateCount} {lateCount === 1 ? 'dose risulta in ritardo' : 'dosi risultano in ritardo'}!
-              </h4>
-              <p className="text-xs text-rose-800 mt-0.5">
-                Le notifiche Telegram, Email e Push continuano a sollecitare i caregiver finché la somministrazione non viene registrata o segnata come non somministrata.
-              </p>
+          )}
+
+          {lateCount > 0 && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs font-semibold animate-pulse">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+              <span>In ritardo: <strong>{lateCount}</strong></span>
             </div>
-          </div>
-          <button
-            onClick={() => audioAlert.playUrgentChime()}
-            className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors shrink-0 shadow-xs"
-          >
-            <Volume2 className="w-4 h-4" />
-            Suona Avviso
-          </button>
-        </div>
-      )}
-
-      {/* Summary Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Terapie Previste</span>
-          <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1 font-['Outfit']">{totalCount}</div>
-          <div className="text-xs text-slate-500 mt-1">Dosi programmate per la giornata</div>
-        </div>
-
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-emerald-200/80 shadow-xs bg-gradient-to-br from-white to-emerald-50/30">
-          <span className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wider">Somministrate</span>
-          <div className="text-2xl sm:text-3xl font-extrabold text-emerald-700 mt-1 font-['Outfit']">{takenCount}</div>
-          <div className="flex items-center gap-1.5 text-xs text-emerald-700 mt-1 font-semibold">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>{percentCompleted}% completamento</span>
-          </div>
-        </div>
-
-        <div className={`p-4 sm:p-5 rounded-2xl border shadow-xs transition-colors ${
-          lateCount > 0
-            ? 'bg-rose-50 border-rose-300 text-rose-950'
-            : 'bg-white border-slate-200/80'
-        }`}>
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">In Ritardo</span>
-          <div className={`text-2xl sm:text-3xl font-extrabold mt-1 font-['Outfit'] ${lateCount > 0 ? 'text-rose-700' : 'text-slate-900'}`}>
-            {lateCount}
-          </div>
-          <div className="text-xs text-slate-500 mt-1">
-            {lateCount > 0 ? 'Richiede attenzione immediata' : 'Nessun ritardo'}
-          </div>
-        </div>
-
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Pazienti Coinvolti</span>
-          <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1 font-['Outfit']">
-            {patients.length}
-          </div>
-          <div className="text-xs text-slate-500 mt-1">
-            {caregivers.length} caregiver coordinati
-          </div>
+          )}
         </div>
 
       </div>
 
-      {/* Patient & Time Slot Filter Controls */}
-      <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs flex flex-wrap items-center justify-between gap-3">
+      {/* Patients & Time of Day Filters */}
+      <div className="bg-white rounded-2xl p-4 shadow-xs border border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3">
         
-        {/* Patient selector pills */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-xs font-bold text-slate-500 mr-1 flex items-center gap-1">
-            <Filter className="w-3.5 h-3.5" /> Paziente:
-          </span>
+        {/* Patient Tabs */}
+        <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
           <button
             onClick={() => setSelectedPatientId('all')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 ${
               selectedPatientId === 'all'
                 ? 'bg-sky-700 text-white shadow-xs'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -363,7 +308,7 @@ export const TodayDosesView: React.FC<TodayDosesViewProps> = ({
               <button
                 key={p.id}
                 onClick={() => setSelectedPatientId(p.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 ${
                   selectedPatientId === p.id
                     ? 'bg-sky-700 text-white shadow-xs'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -376,7 +321,7 @@ export const TodayDosesView: React.FC<TodayDosesViewProps> = ({
         </div>
 
         {/* Time of day filters */}
-        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl shrink-0">
           <button
             onClick={() => setTimeFilter('all')}
             className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-colors ${
@@ -439,7 +384,8 @@ export const TodayDosesView: React.FC<TodayDosesViewProps> = ({
           filteredItems.map(item => {
             const isTaken = item.status === 'taken';
             const isSkipped = item.status === 'skipped';
-            const isLate = item.isOverdue && !isTaken && !isSkipped;
+            const isPending = !isTaken && !isSkipped;
+            const isLate = item.isOverdue && isPending;
 
             return (
               <div
@@ -447,24 +393,26 @@ export const TodayDosesView: React.FC<TodayDosesViewProps> = ({
                 className={`bg-white rounded-2xl border transition-all shadow-xs overflow-hidden ${
                   isTaken
                     ? 'border-emerald-200/90 bg-emerald-50/15'
+                    : isSkipped
+                    ? 'border-rose-200/90 bg-rose-50/15'
                     : isLate
                     ? 'border-rose-300 ring-2 ring-rose-100 bg-rose-50/20'
                     : 'border-slate-200/90 hover:border-sky-300'
                 }`}
               >
-                <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                   
-                  {/* Left Pill color & Drug Information */}
+                  {/* Left Drug Information */}
                   <div className="flex items-start gap-3.5">
                     {/* Vertical Color Indicator */}
                     <div
-                      className="w-3.5 self-stretch rounded-full shrink-0 min-h-[48px]"
+                      className="w-3.5 self-stretch rounded-full shrink-0 min-h-[50px]"
                       style={{ backgroundColor: item.therapy.color || '#0284c7' }}
                       title="Codice colore farmaco"
                     />
 
                     <div>
-                      {/* Patient Name & Scheduled Time */}
+                      {/* Patient Name & Medication */}
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-slate-900 text-base font-['Outfit']">
                           {item.therapy.medicationName}
@@ -491,6 +439,8 @@ export const TodayDosesView: React.FC<TodayDosesViewProps> = ({
                         <span className={`inline-flex items-center gap-1 font-bold px-2.5 py-0.5 rounded-lg text-xs ${
                           isTaken
                             ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : isSkipped
+                            ? 'bg-rose-100 text-rose-800 border border-rose-200'
                             : isLate
                             ? 'bg-rose-100 text-rose-800 border border-rose-300 animate-pulse'
                             : 'bg-slate-100 text-slate-700 border border-slate-200'
@@ -500,30 +450,36 @@ export const TodayDosesView: React.FC<TodayDosesViewProps> = ({
                           {isLate && ' • IN RITARDO'}
                         </span>
 
-                        {/* If Taken: Who took it and exact timestamp */}
-                        {isTaken && item.doseLog?.takenByUserName && (
-                          <span className="text-emerald-700 font-semibold flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Somministrato da <strong>{item.doseLog.takenByUserName}</strong>
-                            {item.doseLog.takenAt && (
-                              <span className="text-[11px] text-emerald-600 font-normal">
+                        {/* 3 Explicit States: In attesa / Somministrato / Non somministrato */}
+                        {isPending && (
+                          <span className="px-2 py-0.5 bg-sky-100 text-sky-800 rounded-md font-bold text-[11px] border border-sky-200">
+                            Stato: In Attesa
+                          </span>
+                        )}
+
+                        {isTaken && (
+                          <span className="text-emerald-700 font-bold flex items-center gap-1 bg-emerald-100/80 px-2 py-0.5 rounded-md border border-emerald-200">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            Stato: Somministrato {item.doseLog?.takenByUserName ? `da ${item.doseLog.takenByUserName}` : ''}
+                            {item.doseLog?.takenAt && (
+                              <span className="text-[10px] text-emerald-600 font-normal">
                                 ({new Date(item.doseLog.takenAt).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })})
                               </span>
                             )}
                           </span>
                         )}
 
-                        {/* If Skipped */}
                         {isSkipped && (
-                          <span className="text-rose-700 font-semibold">
-                            Saltato / Non somministrato da {item.doseLog?.takenByUserName || 'Caregiver'}
+                          <span className="text-rose-700 font-bold flex items-center gap-1 bg-rose-100/80 px-2 py-0.5 rounded-md border border-rose-200">
+                            <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                            Stato: Non Somministrato {item.doseLog?.takenByUserName ? `da ${item.doseLog.takenByUserName}` : ''}
                           </span>
                         )}
 
                         {/* Notes snippet if present */}
                         {item.doseLog?.notes && (
-                          <span className="text-slate-600 italic bg-slate-100 px-2 py-0.5 rounded-md text-[11px]">
-                            "{item.doseLog.notes}"
+                          <span className="text-slate-700 italic bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md text-[11px]">
+                            📝 "{item.doseLog.notes}"
                           </span>
                         )}
 
@@ -539,10 +495,10 @@ export const TodayDosesView: React.FC<TodayDosesViewProps> = ({
                   </div>
 
                   {/* Right Action Buttons */}
-                  <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                  <div className="flex items-center gap-2 self-end lg:self-center shrink-0 flex-wrap justify-end">
                     
                     {/* Send Telegram / Email / Push Nudge */}
-                    {!isTaken && !isSkipped && (
+                    {isPending && (
                       <button
                         onClick={() => onOpenNudgeModal(item)}
                         className="px-3 py-2 bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs"
@@ -557,34 +513,79 @@ export const TodayDosesView: React.FC<TodayDosesViewProps> = ({
                     <button
                       onClick={() => onOpenDoseModal(item)}
                       className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors"
-                      title="Aggiungi note o cambia stato"
+                      title="Modifica note o dettagli"
                     >
                       <FileEdit className="w-4 h-4" />
                     </button>
 
-                    {/* Primary Fast 1-Click Spunta Button */}
-                    <button
-                      onClick={() => handleQuickCheck(item)}
-                      className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-all ${
-                        isTaken
-                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                          : isLate
-                          ? 'bg-rose-600 hover:bg-rose-700 text-white animate-pulse'
-                          : 'bg-sky-700 hover:bg-sky-800 text-white'
-                      }`}
-                    >
-                      {isTaken ? (
-                        <>
-                          <Check className="w-4 h-4" />
-                          <span>Spuntato ✓</span>
-                        </>
-                      ) : (
-                        <>
+                    {/* ACTION BUTTONS: Somministrato & Non Somministrato */}
+                    {isPending ? (
+                      <>
+                        {/* 1. BUTTON: Segna Somministrato */}
+                        <button
+                          onClick={() => handleQuickCheck(item)}
+                          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all ${
+                            isLate
+                              ? 'bg-rose-600 hover:bg-rose-700 text-white animate-pulse'
+                              : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          }`}
+                        >
                           <CheckCircle2 className="w-4 h-4" />
                           <span>Segna Somministrato</span>
-                        </>
-                      )}
-                    </button>
+                        </button>
+
+                        {/* 2. BUTTON: Non Somministrato (opens note pop-up with 'skipped' pre-filled) */}
+                        <button
+                          onClick={() => onOpenDoseModal(item, 'skipped')}
+                          className="px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs"
+                          title="Segna la dose come non somministrata e apri le note"
+                        >
+                          <AlertTriangle className="w-4 h-4 text-rose-600" />
+                          <span>Non Somministrato</span>
+                        </button>
+                      </>
+                    ) : isTaken ? (
+                      <>
+                        {/* Dose is Taken -> Option to revert or switch to Skipped */}
+                        <button
+                          onClick={() => handleQuickCheck(item)}
+                          className="px-3.5 py-2.5 bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs hover:bg-emerald-800"
+                          title="Clicca per riportare in attesa"
+                        >
+                          <Check className="w-4 h-4" />
+                          <span>Somministrato ✓</span>
+                        </button>
+
+                        <button
+                          onClick={() => onOpenDoseModal(item, 'skipped')}
+                          className="px-3 py-2 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 rounded-xl text-xs font-semibold transition-colors"
+                          title="Cambia in non somministrato"
+                        >
+                          Non Somministrato
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {/* Dose is Skipped -> Option to switch to Taken or revert */}
+                        <button
+                          onClick={() => handleQuickCheck(item)}
+                          className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs"
+                          title="Cambia in somministrato"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>Segna Somministrato</span>
+                        </button>
+
+                        <button
+                          onClick={() => onOpenDoseModal(item, 'pending')}
+                          className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-semibold transition-colors"
+                          title="Riporta in attesa"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">In Attesa</span>
+                        </button>
+                      </>
+                    )}
 
                   </div>
 

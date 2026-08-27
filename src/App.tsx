@@ -25,6 +25,7 @@ import { DoseActionModal } from './components/DoseActionModal';
 import { NudgeModal } from './components/NudgeModal';
 import { UserProfileModal } from './components/UserProfileModal';
 import { CookieConsentBanner } from './components/CookieConsentBanner';
+import { InAppNotificationBanner } from './components/InAppNotificationBanner';
 import { api } from './services/api';
 import {
   User,
@@ -63,7 +64,10 @@ export const App: React.FC = () => {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState<boolean>(false);
   const [isInstallModalOpen, setIsInstallModalOpen] = useState<boolean>(false);
-  const [activeDoseModalItem, setActiveDoseModalItem] = useState<ScheduledDoseItem | null>(null);
+  const [activeDoseModalState, setActiveDoseModalState] = useState<{
+    item: ScheduledDoseItem;
+    initialStatus?: 'taken' | 'skipped' | 'pending';
+  } | null>(null);
   const [activeNudgeModalItem, setActiveNudgeModalItem] = useState<ScheduledDoseItem | null>(null);
 
   // Load app data
@@ -262,7 +266,13 @@ export const App: React.FC = () => {
               if (pushEnabled) {
                 showLocalNotification(`🔔 Ora del farmaco: ${patient.name}`, {
                   body: `È il momento di assumere ${therapy.medicationName}${therapy.dosage ? ` (${therapy.dosage})` : ''} - Orario: ${slot}.`,
-                  tag: doseId
+                  tag: doseId,
+                  therapyId: therapy.id,
+                  patientId: patient.id,
+                  scheduledDate: todayDateStr,
+                  scheduledTime: slot,
+                  medicationName: therapy.medicationName,
+                  patientName: patient.name
                 });
               }
             }
@@ -486,7 +496,7 @@ export const App: React.FC = () => {
                 currentFamily={currentFamily}
                 caregivers={members}
                 onToggleDose={handleToggleDose}
-                onOpenDoseModal={(item) => setActiveDoseModalItem(item)}
+                onOpenDoseModal={(item, initialStatus) => setActiveDoseModalState({ item, initialStatus })}
                 onOpenNudgeModal={(item) => setActiveNudgeModalItem(item)}
                 onNavigateToTherapies={() => setActiveTab('therapies')}
               />
@@ -653,16 +663,18 @@ export const App: React.FC = () => {
       />
 
       <DoseActionModal
-        isOpen={Boolean(activeDoseModalItem)}
-        doseItem={activeDoseModalItem}
-        onClose={() => setActiveDoseModalItem(null)}
+        isOpen={Boolean(activeDoseModalState)}
+        doseItem={activeDoseModalState?.item || null}
+        initialStatus={activeDoseModalState?.initialStatus}
+        onClose={() => setActiveDoseModalState(null)}
         onConfirm={async (status, notes) => {
-          if (!activeDoseModalItem) return;
+          if (!activeDoseModalState?.item) return;
+          const item = activeDoseModalState.item;
           await handleToggleDose({
-            therapyId: activeDoseModalItem.therapy.id,
-            patientId: activeDoseModalItem.patient.id,
-            scheduledDate: activeDoseModalItem.scheduledDate,
-            scheduledTime: activeDoseModalItem.scheduledTime,
+            therapyId: item.therapy.id,
+            patientId: item.patient.id,
+            scheduledDate: item.scheduledDate,
+            scheduledTime: item.scheduledTime,
             status,
             notes
           });
@@ -690,6 +702,31 @@ export const App: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* In-App Floating Notification Banner & Push Permission Prompt */}
+      <InAppNotificationBanner
+        onConfirmDose={handleToggleDose}
+        onOpenSkipModal={(payload) => {
+          const matchingTherapy = therapies.find(t => t.id === payload.therapyId);
+          const matchingPatient = patients.find(p => p.id === payload.patientId);
+          if (matchingTherapy && matchingPatient) {
+            const scheduledItem: ScheduledDoseItem = {
+              id: `${payload.therapyId}_${payload.scheduledDate}_${payload.scheduledTime}`,
+              doseLogId: `${payload.therapyId}_${payload.scheduledDate}_${payload.scheduledTime}`,
+              therapy: matchingTherapy,
+              patient: matchingPatient,
+              scheduledDate: payload.scheduledDate,
+              scheduledTime: payload.scheduledTime,
+              scheduledDateTime: new Date(`${payload.scheduledDate}T${payload.scheduledTime}:00`),
+              status: 'pending',
+              isDueNow: true,
+              isUpcoming: false,
+              isOverdue: false
+            };
+            setActiveDoseModalState({ item: scheduledItem, initialStatus: 'skipped' });
+          }
+        }}
+      />
 
       <CookieConsentBanner
         onOpenPrivacyModal={() => setIsInfoModalOpen(true)}

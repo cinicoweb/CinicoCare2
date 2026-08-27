@@ -1239,6 +1239,88 @@ export const api = {
     return { success: true, message: 'Database azzerato con successo' };
   },
 
+  // --------------------------------------------------------------------------
+  // ADMIN CONFIGURATION (TELEGRAM BOT & SMTP EMAIL SERVER)
+  // --------------------------------------------------------------------------
+  async getAdminTelegramConfig(): Promise<{ success: boolean; config: any; status: any }> {
+    const token = this.getToken();
+    const res = await fetch('/api/admin/telegram-config', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Errore recupero configurazione Telegram');
+    return data;
+  },
+
+  async updateAdminTelegramConfig(config: {
+    botToken?: string;
+    botUsername?: string;
+    pollingEnabled?: boolean;
+    pollingIntervalMs?: number;
+  }): Promise<{ success: boolean; message: string; config: any; status: any }> {
+    const token = this.getToken();
+    const res = await fetch('/api/admin/telegram-config', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify(config)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Errore salvataggio configurazione Telegram');
+    return data;
+  },
+
+  async getAdminSmtpConfig(): Promise<{ success: boolean; config: any; status: any }> {
+    const token = this.getToken();
+    const res = await fetch('/api/admin/smtp-config', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Errore recupero configurazione SMTP');
+    return data;
+  },
+
+  async updateAdminSmtpConfig(config: {
+    enabled?: boolean;
+    host?: string;
+    port?: number;
+    secure?: boolean;
+    user?: string;
+    pass?: string;
+    fromEmail?: string;
+    fromName?: string;
+  }): Promise<{ success: boolean; message: string; config: any; status: any }> {
+    const token = this.getToken();
+    const res = await fetch('/api/admin/smtp-config', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify(config)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Errore salvataggio configurazione SMTP');
+    return data;
+  },
+
+  async testAdminSmtp(testEmailAddress?: string): Promise<{ success: boolean; message: string }> {
+    const token = this.getToken();
+    const res = await fetch('/api/admin/smtp-test', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ testEmailAddress })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Errore test invio email SMTP');
+    return data;
+  },
+
   exportBackup(): string {
     return ClientStorageManager.exportFullBackup();
   },

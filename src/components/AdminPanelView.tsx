@@ -20,7 +20,13 @@ import {
   ExternalLink,
   Sparkles,
   Eye,
-  CheckCheck
+  EyeOff,
+  CheckCheck,
+  Server,
+  Lock,
+  Settings2,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { api } from '../services/api';
 
@@ -45,6 +51,36 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
   const [resetting, setResetting] = useState(false);
   const [resetSuccessMsg, setResetSuccessMsg] = useState<string | null>(null);
 
+  // Telegram Config State
+  const [tgBotToken, setTgBotToken] = useState('');
+  const [tgBotUsername, setTgBotUsername] = useState('Guardian32170_bot');
+  const [tgPollingEnabled, setTgPollingEnabled] = useState(true);
+  const [tgStatus, setTgStatus] = useState<any>(null);
+  const [tgSaving, setTgSaving] = useState(false);
+  const [tgSaveMsg, setTgSaveMsg] = useState<string | null>(null);
+  const [tgErrorMsg, setTgErrorMsg] = useState<string | null>(null);
+  const [showTgToken, setShowTgToken] = useState(false);
+
+  // SMTP Config State
+  const [smtpHost, setSmtpHost] = useState('');
+  const [smtpPort, setSmtpPort] = useState<number>(587);
+  const [smtpSecure, setSmtpSecure] = useState(false);
+  const [smtpUser, setSmtpUser] = useState('');
+  const [smtpPass, setSmtpPass] = useState('');
+  const [smtpFromEmail, setSmtpFromEmail] = useState('notifiche@cinicocare.it');
+  const [smtpFromName, setSmtpFromName] = useState('CinicoCare Notifiche');
+  const [smtpIsConfigured, setSmtpIsConfigured] = useState(false);
+  const [smtpSaving, setSmtpSaving] = useState(false);
+  const [smtpSaveMsg, setSmtpSaveMsg] = useState<string | null>(null);
+  const [smtpErrorMsg, setSmtpErrorMsg] = useState<string | null>(null);
+  const [showSmtpPass, setShowSmtpPass] = useState(false);
+
+  // SMTP Test State
+  const [testEmailRecipient, setTestEmailRecipient] = useState('');
+  const [testEmailSending, setTestEmailSending] = useState(false);
+  const [testEmailResult, setTestEmailResult] = useState<string | null>(null);
+  const [testEmailError, setTestEmailError] = useState<string | null>(null);
+
   // Notification Simulator state
   const [simTargetUserId, setSimTargetUserId] = useState<string>('');
   const [simType, setSimType] = useState<'registration_email' | 'therapy_reminder' | 'custom_telegram'>('registration_email');
@@ -60,7 +96,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
       const data = await api.getAdminOverview();
       setOverview(data);
       if (data?.allUsers?.length && !simTargetUserId) {
-        // Default to first caregiver or first user
         const firstCaregiver = data.allUsers.find((u: any) => u.role === 'caregiver') || data.allUsers[0];
         if (firstCaregiver) setSimTargetUserId(firstCaregiver.id);
       }
@@ -71,9 +106,116 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
     }
   };
 
+  const fetchConfigs = async () => {
+    try {
+      const [tgRes, smtpRes] = await Promise.allSettled([
+        api.getAdminTelegramConfig(),
+        api.getAdminSmtpConfig()
+      ]);
+
+      if (tgRes.status === 'fulfilled') {
+        const tgData = tgRes.value;
+        if (tgData?.config) {
+          setTgBotUsername(tgData.config.botUsername || 'Guardian32170_bot');
+          setTgPollingEnabled(tgData.config.pollingEnabled !== false);
+        }
+        if (tgData?.status) {
+          setTgStatus(tgData.status);
+        }
+      }
+
+      if (smtpRes.status === 'fulfilled') {
+        const smtpData = smtpRes.value;
+        if (smtpData?.config) {
+          setSmtpHost(smtpData.config.host || '');
+          setSmtpPort(smtpData.config.port || 587);
+          setSmtpSecure(Boolean(smtpData.config.secure));
+          setSmtpUser(smtpData.config.user || '');
+          setSmtpFromEmail(smtpData.config.fromEmail || 'notifiche@cinicocare.it');
+          setSmtpFromName(smtpData.config.fromName || 'CinicoCare Notifiche');
+          setSmtpIsConfigured(Boolean(smtpData.config.isConfigured));
+        }
+      }
+    } catch (e) {
+      console.warn('Could not load remote telegram/smtp configs:', e);
+    }
+  };
+
   useEffect(() => {
     fetchOverview();
+    fetchConfigs();
   }, []);
+
+  // Save Telegram Bot Config
+  const handleSaveTelegramConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTgSaving(true);
+    setTgSaveMsg(null);
+    setTgErrorMsg(null);
+
+    try {
+      const res = await api.updateAdminTelegramConfig({
+        botToken: tgBotToken.trim() || undefined,
+        botUsername: tgBotUsername.trim(),
+        pollingEnabled: tgPollingEnabled
+      });
+
+      setTgSaveMsg(res.message || 'Configurazione Bot Telegram aggiornata con successo!');
+      if (res.status) setTgStatus(res.status);
+      setTgBotToken(''); // clear token input for security
+      setTimeout(() => setTgSaveMsg(null), 5000);
+    } catch (err: any) {
+      setTgErrorMsg(err.message || 'Errore durante il salvataggio della configurazione Telegram');
+    } finally {
+      setTgSaving(false);
+    }
+  };
+
+  // Save SMTP Config
+  const handleSaveSmtpConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSmtpSaving(true);
+    setSmtpSaveMsg(null);
+    setSmtpErrorMsg(null);
+
+    try {
+      const res = await api.updateAdminSmtpConfig({
+        host: smtpHost.trim(),
+        port: Number(smtpPort) || 587,
+        secure: smtpSecure,
+        user: smtpUser.trim(),
+        pass: smtpPass.trim() || undefined,
+        fromEmail: smtpFromEmail.trim(),
+        fromName: smtpFromName.trim()
+      });
+
+      setSmtpSaveMsg(res.message || 'Configurazione SMTP salvata con successo!');
+      setSmtpIsConfigured(true);
+      setSmtpPass(''); // clear password for security
+      setTimeout(() => setSmtpSaveMsg(null), 5000);
+    } catch (err: any) {
+      setSmtpErrorMsg(err.message || 'Errore durante il salvataggio dei parametri SMTP');
+    } finally {
+      setSmtpSaving(false);
+    }
+  };
+
+  // Send Test Email
+  const handleSendTestEmail = async () => {
+    setTestEmailSending(true);
+    setTestEmailResult(null);
+    setTestEmailError(null);
+
+    try {
+      const res = await api.testAdminSmtp(testEmailRecipient.trim() || undefined);
+      setTestEmailResult(res.message || 'Email di test inviata con successo!');
+      setTimeout(() => setTestEmailResult(null), 6000);
+    } catch (err: any) {
+      setTestEmailError(err.message || 'Errore durante il test del server SMTP');
+    } finally {
+      setTestEmailSending(false);
+    }
+  };
 
   const handleStep1Confirm = () => {
     setIsResetStep1Open(false);
@@ -170,13 +312,13 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
     if (!simTargetUserId) return;
     const targetUser = overview?.allUsers?.find((u: any) => u.id === simTargetUserId);
     if (!targetUser?.telegramChatId) {
-      alert('Questo utente non ha ancora collegato il bot Telegram (@Guardian32170_bot). Può collegarlo aprendo il suo link univoco: ' + api.getTelegramDeepLink(simTargetUserId));
+      alert(`Questo utente non ha ancora collegato il bot Telegram (@${tgBotUsername || 'Guardian32170_bot'}). Può collegarlo aprendo il suo link univoco: ${api.getTelegramDeepLink(simTargetUserId)}`);
       return;
     }
 
     setSimRunning(true);
     try {
-      const text = simCustomMessage.trim() || `🔔 <b>Test Notifica CinicoCare</b>\n\nCiao ${targetUser.name}, questo è un messaggio di test inviato dal Pannello Amministratore tramite @Guardian32170_bot.`;
+      const text = simCustomMessage.trim() || `🔔 <b>Test Notifica CinicoCare</b>\n\nCiao ${targetUser.name}, questo è un messaggio di test inviato dal Pannello Amministratore tramite @${tgBotUsername || 'Guardian32170_bot'}.`;
       const res = await api.sendTelegramTest({
         userId: simTargetUserId,
         text
@@ -190,7 +332,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in pb-12">
       
       {/* Header */}
       <div className="bg-gradient-to-r from-slate-900 via-sky-950 to-slate-900 text-white rounded-2xl p-6 shadow-md border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -202,7 +344,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
             <h2 className="text-xl font-bold font-['Outfit']">Pannello Amministratore Generale</h2>
           </div>
           <p className="text-xs text-slate-300 mt-1">
-            Supervisione globale della piattaforma CinicoCare, simulatore notifiche Telegram/Email, sicurezza account e backup database.
+            Supervisione globale della piattaforma CinicoCare, configurazione dinamica Bot Telegram & Server SMTP, simulatore notifiche e backup database.
           </p>
         </div>
 
@@ -217,7 +359,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
           </button>
 
           <button
-            onClick={fetchOverview}
+            onClick={() => { fetchOverview(); fetchConfigs(); }}
             className="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors"
           >
             <RefreshCw className="w-3.5 h-3.5" />
@@ -301,7 +443,328 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
             </div>
           </div>
 
-          {/* NOTIFICATION & TELEGRAM SIMULATOR (USER REQUEST) */}
+          {/* DYNAMIC CONFIGURATION: TELEGRAM BOT & SMTP SERVER */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            {/* 1. TELEGRAM BOT CONFIGURATION CARD */}
+            <div className="bg-white rounded-2xl p-6 border border-sky-200 shadow-xs space-y-5">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-sky-100 text-sky-700 rounded-xl">
+                    <Bot className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-base font-['Outfit']">
+                      Configurazione Bot Telegram
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Modifica il bot Telegram (@username e Bot Token) utilizzato per inviare le notifiche.
+                    </p>
+                  </div>
+                </div>
+
+                <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-sky-50 text-sky-800 border border-sky-200">
+                  @{tgBotUsername || 'Guardian32170_bot'}
+                </span>
+              </div>
+
+              {/* Bot Live Status */}
+              {tgStatus && (
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2.5 h-2.5 rounded-full ${tgStatus.pollingRunning ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+                    <span className="text-slate-700 font-medium">
+                      Stato Polling: <strong>{tgStatus.pollingRunning ? 'Attivo & In Ascolto' : 'Disattivato'}</strong>
+                    </span>
+                  </div>
+                  {tgStatus.botInfo && (
+                    <span className="text-[11px] text-slate-500 font-mono">
+                      Nome Bot: {tgStatus.botInfo.first_name}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {tgSaveMsg && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs font-semibold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{tgSaveMsg}</span>
+                </div>
+              )}
+
+              {tgErrorMsg && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs font-semibold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{tgErrorMsg}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSaveTelegramConfig} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    Username del Bot Telegram
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-mono font-bold">@</span>
+                    <input
+                      type="text"
+                      required
+                      value={tgBotUsername}
+                      onChange={(e) => setTgBotUsername(e.target.value.replace(/^@/, ''))}
+                      placeholder="es. Guardian32170_bot"
+                      className="w-full pl-7 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-sky-600 outline-none text-xs font-mono"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    I caregiver riceveranno i link tipo <code>https://t.me/{tgBotUsername || 'NomeBot'}?start=...</code>
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    Bot Token Telegram (da @BotFather)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showTgToken ? 'text' : 'password'}
+                      value={tgBotToken}
+                      onChange={(e) => setTgBotToken(e.target.value)}
+                      placeholder="Incolla nuovo token bot per cambiarlo (es. 123456:ABC-DEF...)"
+                      className="w-full pl-3 pr-10 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-sky-600 outline-none text-xs font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowTgToken(!showTgToken)}
+                      className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
+                    >
+                      {showTgToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Lascia vuoto per mantenere il token attualmente attivo in memoria/ambiente.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="checkbox"
+                    id="tgPolling"
+                    checked={tgPollingEnabled}
+                    onChange={(e) => setTgPollingEnabled(e.target.checked)}
+                    className="w-4 h-4 text-sky-600 rounded"
+                  />
+                  <label htmlFor="tgPolling" className="text-xs font-semibold text-slate-700 cursor-pointer">
+                    Abilita sincronizzazione automatica dei messaggi /start in tempo reale (Polling)
+                  </label>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={tgSaving}
+                    className="w-full py-2.5 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Bot className="w-4 h-4" />
+                    {tgSaving ? 'Salvataggio & Verifica in corso...' : 'Salva & Verifica Bot Telegram'}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* 2. SMTP / EMAIL SERVER CONFIGURATION CARD */}
+            <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-5">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-purple-100 text-purple-700 rounded-xl">
+                    <Server className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-base font-['Outfit']">
+                      Server Email / SMTP
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Configura il server SMTP (Sendmail, Postfix, Gmail, Brevo, AWS SES) per l'invio reale delle email di benvenuto e promemoria.
+                    </p>
+                  </div>
+                </div>
+
+                <span className={`text-[11px] font-bold px-2.5 py-1 rounded-lg ${smtpIsConfigured ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-slate-100 text-slate-500'}`}>
+                  {smtpIsConfigured ? 'SMTP Configurato' : 'Predefinito (Log)'}
+                </span>
+              </div>
+
+              {smtpSaveMsg && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs font-semibold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{smtpSaveMsg}</span>
+                </div>
+              )}
+
+              {smtpErrorMsg && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs font-semibold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{smtpErrorMsg}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSaveSmtpConfig} className="space-y-3">
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-2">
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
+                      Host SMTP (Server)
+                    </label>
+                    <input
+                      type="text"
+                      value={smtpHost}
+                      onChange={(e) => setSmtpHost(e.target.value)}
+                      placeholder="es. smtp.gmail.com o mail.tuoserver.it"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-sky-600 outline-none text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
+                      Porta
+                    </label>
+                    <input
+                      type="number"
+                      value={smtpPort}
+                      onChange={(e) => setSmtpPort(Number(e.target.value))}
+                      placeholder="587 o 465"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-sky-600 outline-none text-xs font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
+                      Nome Utente / Email SMTP
+                    </label>
+                    <input
+                      type="text"
+                      value={smtpUser}
+                      onChange={(e) => setSmtpUser(e.target.value)}
+                      placeholder="user@tuodominio.it"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-sky-600 outline-none text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
+                      Password / App Password
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showSmtpPass ? 'text' : 'password'}
+                        value={smtpPass}
+                        onChange={(e) => setSmtpPass(e.target.value)}
+                        placeholder="••••••••••••"
+                        className="w-full pl-3 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-sky-600 outline-none text-xs font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowSmtpPass(!showSmtpPass)}
+                        className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+                      >
+                        {showSmtpPass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
+                      Indirizzo Mittente (From)
+                    </label>
+                    <input
+                      type="email"
+                      value={smtpFromEmail}
+                      onChange={(e) => setSmtpFromEmail(e.target.value)}
+                      placeholder="notifiche@cinicocare.it"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-sky-600 outline-none text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
+                      Nome Mittente
+                    </label>
+                    <input
+                      type="text"
+                      value={smtpFromName}
+                      onChange={(e) => setSmtpFromName(e.target.value)}
+                      placeholder="CinicoCare Assistenza"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-sky-600 outline-none text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="checkbox"
+                    id="smtpSecure"
+                    checked={smtpSecure}
+                    onChange={(e) => setSmtpSecure(e.target.checked)}
+                    className="w-4 h-4 text-purple-600 rounded"
+                  />
+                  <label htmlFor="smtpSecure" className="text-xs font-semibold text-slate-700 cursor-pointer">
+                    Usa SSL/TLS Diretto (Attiva per porta 465, disattiva per porta 587 STARTTLS)
+                  </label>
+                </div>
+
+                <div className="pt-2 flex items-center gap-2">
+                  <button
+                    type="submit"
+                    disabled={smtpSaving}
+                    className="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Server className="w-4 h-4" />
+                    {smtpSaving ? 'Salvataggio...' : 'Salva Parametri SMTP'}
+                  </button>
+                </div>
+              </form>
+
+              {/* Send Test Email Block */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <label className="block text-xs font-bold text-slate-800">
+                  Invia Email di Test
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    value={testEmailRecipient}
+                    onChange={(e) => setTestEmailRecipient(e.target.value)}
+                    placeholder="Tua email per ricevere il test (es. admin@example.com)"
+                    className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl focus:border-purple-600 outline-none text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSendTestEmail}
+                    disabled={testEmailSending}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 shrink-0"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    {testEmailSending ? 'Invio...' : 'Invia Test'}
+                  </button>
+                </div>
+                {testEmailResult && (
+                  <p className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                    {testEmailResult}
+                  </p>
+                )}
+                {testEmailError && (
+                  <p className="text-[11px] font-semibold text-rose-700 flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    {testEmailError}
+                  </p>
+                )}
+              </div>
+
+            </div>
+
+          </div>
+
+          {/* NOTIFICATION & TELEGRAM SIMULATOR */}
           <div className="bg-white rounded-2xl p-6 border border-sky-200 shadow-sm space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
               <div>
@@ -314,13 +777,13 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
                   </h3>
                 </div>
                 <p className="text-xs text-slate-500 mt-1">
-                  Testa e simula l'invio delle email di benvenuto con link Telegram univoco o delle notifiche push del bot @Guardian32170_bot per qualsiasi caregiver.
+                  Testa e simula l'invio delle email di benvenuto con link Telegram univoco o delle notifiche push del bot @{tgBotUsername || 'Guardian32170_bot'} per qualsiasi caregiver.
                 </p>
               </div>
 
               <div className="flex items-center gap-2">
                 <span className="text-[11px] bg-sky-50 text-sky-800 border border-sky-200 font-bold px-2.5 py-1 rounded-lg">
-                  Bot: @Guardian32170_bot
+                  Bot: @{tgBotUsername || 'Guardian32170_bot'}
                 </span>
               </div>
             </div>
@@ -381,7 +844,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
                     🔔 Promemoria Terapia / Sollecito Caregiver Telegram
                   </option>
                   <option value="custom_telegram">
-                    💬 Messaggio Test Telegram Libero (@Guardian32170_bot)
+                    💬 Messaggio Test Telegram Libero (@{tgBotUsername || 'Guardian32170_bot'})
                   </option>
                 </select>
               </div>
@@ -602,7 +1065,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
                           rel="noreferrer"
                           className="text-sky-600 hover:text-sky-800 hover:underline flex items-center gap-1"
                         >
-                          <ExternalLink className="w-3 h-3" /> t.me/Guardian32170_bot?start={u.id}
+                          <ExternalLink className="w-3 h-3" /> t.me/{tgBotUsername || 'Guardian32170_bot'}?start={u.id}
                         </a>
                       </td>
                     </tr>
@@ -718,4 +1181,3 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({ onRefreshData, o
     </div>
   );
 };
-
