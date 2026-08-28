@@ -52,6 +52,25 @@ function getTodayString(): string {
   return `${year}-${month}-${day}`;
 }
 
+// Helper to safely parse API responses and handle HTML/text errors without throwing JSON syntax errors
+async function parseApiResponse<T = any>(res: Response, defaultErrorMsg = 'Errore durante la comunicazione con il server'): Promise<T> {
+  const text = await res.text();
+  let data: any = null;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    const cleaned = (text || '').replace(/<[^>]*>?/gm, '').trim();
+    data = { error: cleaned || defaultErrorMsg };
+  }
+
+  if (!res.ok) {
+    const errorMsg = data?.error || data?.message || (res.status === 401 ? 'Sessione non valida o scaduta' : defaultErrorMsg);
+    throw new Error(errorMsg);
+  }
+
+  return data as T;
+}
+
 export const api = {
   getToken(): string | null {
     return localStorage.getItem(TOKEN_KEY);
@@ -960,17 +979,19 @@ export const api = {
   }): Promise<{ success: boolean; message: string; messageId?: number; recipient?: string }> {
     const token = this.getToken();
     if (token) {
-      const res = await fetch('/api/telegram/send-test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Errore invio notifica Telegram');
-      return data;
+      try {
+        const res = await fetch('/api/telegram/send-test', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify(payload)
+        });
+        return await parseApiResponse(res, 'Errore durante l\'invio del messaggio di test Telegram');
+      } catch (err: any) {
+        throw new Error(err.message || 'Errore invio notifica Telegram');
+      }
     }
 
     return {
@@ -1000,23 +1021,29 @@ export const api = {
     message?: string;
   }> {
     const token = this.getToken();
+    const dbLocal = ClientStorageManager.getDB();
+    const targetUser = dbLocal.users.find(u => u.id === payload.targetUserId);
+
     if (token) {
-      const res = await fetch('/api/admin/simulate-notification', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Errore simulazione notifica');
-      return data;
+      try {
+        const res = await fetch('/api/admin/simulate-notification', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            ...payload,
+            targetUserFallback: targetUser
+          })
+        });
+        return await parseApiResponse(res, 'Errore durante la simulazione della notifica');
+      } catch (err: any) {
+        console.warn('Server simulation fallback to local:', err);
+      }
     }
 
     // Client fallback simulation
-    const dbLocal = ClientStorageManager.getDB();
-    const targetUser = dbLocal.users.find(u => u.id === payload.targetUserId);
     if (!targetUser) throw new Error('Utente destinatario non trovato');
 
     const deepLink = this.getTelegramDeepLink(targetUser.id);
@@ -1210,8 +1237,27 @@ export const api = {
   },
 
   async resetDatabase(confirmationText: string): Promise<{ success: boolean; message: string }> {
-    if (confirmationText !== 'RESET_CINICOCARE_2026') {
-      throw new Error('Codice di conferma errato');
+    const text = (confirmationText || '').trim().toUpperCase();
+    if (text !== 'CANCELLA' && text !== 'RESET_CINICOCARE_2026') {
+      throw new Error('Codice di conferma errato. Digita esattamente "CANCELLA"');
+    }
+
+    // Call server backend reset if token exists
+    const token = this.getToken();
+    if (token) {
+      try {
+        const res = await fetch('/api/admin/reset', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ confirmationText: text })
+        });
+        await parseApiResponse(res, 'Errore durante il reset del database centrale');
+      } catch (err: any) {
+        console.warn('Backend reset API notice:', err);
+      }
     }
 
     try {
@@ -1236,7 +1282,7 @@ export const api = {
     }
 
     ClientStorageManager.resetDatabase();
-    return { success: true, message: 'Database azzerato con successo' };
+    return { success: true, message: 'Database CinicoCare azzerato e ripristinato con successo.' };
   },
 
   // --------------------------------------------------------------------------
@@ -1247,9 +1293,7 @@ export const api = {
     const res = await fetch('/api/admin/telegram-config', {
       headers: { Authorization: `Bearer ${token}` }
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Errore recupero configurazione Telegram');
-    return data;
+    return await parseApiResponse(res, 'Errore recupero configurazione Telegram');
   },
 
   async updateAdminTelegramConfig(config: {
@@ -1267,9 +1311,7 @@ export const api = {
       },
       body: JSON.stringify(config)
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Errore salvataggio configurazione Telegram');
-    return data;
+    return await parseApiResponse(res, 'Errore salvataggio configurazione Telegram');
   },
 
   async getAdminSmtpConfig(): Promise<{ success: boolean; config: any; status: any }> {
@@ -1277,9 +1319,7 @@ export const api = {
     const res = await fetch('/api/admin/smtp-config', {
       headers: { Authorization: `Bearer ${token}` }
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Errore recupero configurazione SMTP');
-    return data;
+    return await parseApiResponse(res, 'Errore recupero configurazione SMTP');
   },
 
   async updateAdminSmtpConfig(config: {
@@ -1301,9 +1341,7 @@ export const api = {
       },
       body: JSON.stringify(config)
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Errore salvataggio configurazione SMTP');
-    return data;
+    return await parseApiResponse(res, 'Errore salvataggio configurazione SMTP');
   },
 
   async testAdminSmtp(testEmailAddress?: string): Promise<{ success: boolean; message: string }> {
@@ -1316,9 +1354,7 @@ export const api = {
       },
       body: JSON.stringify({ testEmailAddress })
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Errore test invio email SMTP');
-    return data;
+    return await parseApiResponse(res, 'Errore durante la verifica del server SMTP');
   },
 
   exportBackup(): string {

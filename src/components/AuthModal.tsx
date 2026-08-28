@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
+  Pill,
   Heart,
   Lock,
   Mail,
@@ -157,8 +158,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <X className="w-5 h-5" />
           </button>
 
-          <div className="mx-auto w-14 h-14 bg-white/10 backdrop-blur-md rounded-2xl flex items-center justify-center mb-2.5 shadow-inner">
-            <Heart className="w-8 h-8 text-sky-200" />
+          <div className="mx-auto w-14 h-14 bg-gradient-to-tr from-sky-500 to-teal-400 backdrop-blur-md rounded-2xl flex items-center justify-center mb-2.5 shadow-lg shadow-sky-950/30 border border-white/20">
+            <Pill className="w-8 h-8 text-white rotate-45" />
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold font-['Outfit'] tracking-tight">CinicoCare</h1>
           <p className="text-sky-100 text-xs sm:text-sm mt-1 max-w-sm mx-auto">

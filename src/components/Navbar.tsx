@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
+  Pill,
   Heart,
   CalendarCheck,
   Activity,
@@ -71,8 +72,9 @@ export const Navbar: React.FC<NavbarProps> = ({
           
           {/* Brand Logo & Family Name */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-tr from-sky-700 to-teal-700 rounded-2xl flex items-center justify-center shadow-md shadow-sky-900/10 text-white shrink-0">
-              <Heart className="w-6 h-6 sm:w-7 sm:h-7 fill-white/20 text-white" />
+            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-tr from-sky-600 via-sky-700 to-teal-600 rounded-2xl flex items-center justify-center shadow-md shadow-sky-900/15 text-white shrink-0 relative overflow-hidden border border-white/20">
+              <div className="absolute inset-0 bg-radial from-white/25 via-transparent to-transparent opacity-60 pointer-events-none" />
+              <Pill className="w-6 h-6 sm:w-7 sm:h-7 text-white rotate-45 drop-shadow-sm" />
             </div>
             <div>
               <div className="flex items-center gap-2">

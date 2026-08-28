@@ -849,21 +849,32 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
 
           {/* Privacy Disclaimer & Medical Device Notice */}
           <div className="border-t border-slate-100 pt-5">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
               <div>
-                <h4 className="font-bold text-slate-900 text-sm flex items-center gap-1.5">
-                  <FileText className="w-4 h-4 text-sky-700" />
-                  Informativa Privacy & Termini (Non Dispositivo Medico)
-                </h4>
+                <div className="flex items-center gap-2">
+                  <h4 className="font-bold text-slate-900 text-sm flex items-center gap-1.5">
+                    <FileText className="w-4 h-4 text-sky-700" />
+                    Informativa Privacy & Termini (Non Dispositivo Medico)
+                  </h4>
+                  {currentUser.role === 'superadmin' ? (
+                    <span className="px-2 py-0.5 bg-purple-100 text-purple-800 text-[10px] font-bold rounded-md border border-purple-200">
+                      Modifica SuperAdmin
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 bg-slate-100 text-slate-700 text-[10px] font-semibold rounded-md border border-slate-200 flex items-center gap-1">
+                      <Lock className="w-2.5 h-2.5" /> Riservato solo all'Admin
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Testo informativo visualizzato nel footer e al login. Dichiara esplicitamente la natura di strumento di supporto e non dispositivo medico.
+                  Testo legale visualizzato all'accesso e nel footer. Dichiara la natura di supporto e l'assenza di finalità mediche diagnostico-terapeutiche.
                 </p>
               </div>
-              {isFamilyAdmin && (
+              {currentUser.role === 'superadmin' && (
                 <button
                   type="button"
                   onClick={() => setPrivacyDisclaimerMarkdown(DEFAULT_PRIVACY_DISCLAIMER_MARKDOWN)}
-                  className="px-2.5 py-1 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg flex items-center gap-1 transition-colors"
+                  className="px-2.5 py-1 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg flex items-center gap-1 transition-colors self-start sm:self-auto"
                   title="Ripristina il testo predefinito"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
@@ -872,13 +883,26 @@ export const GroupSettingsView: React.FC<GroupSettingsViewProps> = ({
               )}
             </div>
 
+            {currentUser.role !== 'superadmin' && (
+              <div className="mb-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-600 flex items-center gap-2">
+                <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                <span>
+                  L'informativa privacy è standardizzata e può essere modificata unicamente dall'<strong>Amministratore Generale</strong> nel pannello Admin per garantire la conformità normativa (GDPR).
+                </span>
+              </div>
+            )}
+
             <textarea
               rows={8}
-              disabled={!isFamilyAdmin}
+              disabled={currentUser.role !== 'superadmin'}
               value={privacyDisclaimerMarkdown}
               onChange={(e) => setPrivacyDisclaimerMarkdown(e.target.value)}
               placeholder="Inserisci il testo dell'informativa in formato Markdown..."
-              className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono outline-none focus:bg-white focus:border-sky-600"
+              className={`w-full p-3 border rounded-xl text-xs font-mono outline-none ${
+                currentUser.role === 'superadmin'
+                  ? 'bg-slate-50 border-slate-200 focus:bg-white focus:border-sky-600 text-slate-900'
+                  : 'bg-slate-100/80 border-slate-200 text-slate-600 cursor-not-allowed select-text'
+              }`}
             />
           </div>
 
